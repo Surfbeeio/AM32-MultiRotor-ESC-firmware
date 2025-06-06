@@ -288,7 +288,7 @@
 #define FILE_NAME				"SURFBEE_G071"
 #define FIRMWARE_NAME  			"SURFBEE G0"
 #define DEAD_TIME               60
-#define MILLIVOLT_PER_AMP       33
+#define MILLIVOLT_PER_AMP       20
 #define CURRENT_OFFSET          0
 #define TARGET_VOLTAGE_DIVIDER  218
 #define HARDWARE_GROUP_G0_N
