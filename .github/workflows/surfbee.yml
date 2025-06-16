@@ -1,6 +1,7 @@
 name: Build SURFBEE_G071
 
 on:
+  workflow_dispatch:  # Enables manual triggering
   push:
     branches:
       - surfbee_v1.95
