@@ -1,8 +1,9 @@
 name: Build SURFBEE_G071
 
 on:
-  workflow_dispatch:
-
+  push:
+    branches:
+      - surfbee_v1.95
 jobs:
   build:
     runs-on: ubuntu-latest
