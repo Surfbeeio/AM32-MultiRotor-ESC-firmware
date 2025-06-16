@@ -296,6 +296,18 @@
 #define SIXTY_FOUR_KB_MEMORY
 #endif
 
+#ifdef  SURFBEE_G071
+#define FILE_NAME				"SURFBEE_G071"
+#define FIRMWARE_NAME  			"SurfBee G0"
+#define DEAD_TIME               60
+#define MILLIVOLT_PER_AMP       20
+#define CURRENT_OFFSET          0
+#define TARGET_VOLTAGE_DIVIDER  218
+#define HARDWARE_GROUP_G0_N
+#define USE_SERIAL_TELEMETRY
+#define SIXTY_FOUR_KB_MEMORY
+#endif
+
 
 #ifdef AIKON_PRO_G071
 #define FILE_NAME				"AIKON_PRO_G071"
