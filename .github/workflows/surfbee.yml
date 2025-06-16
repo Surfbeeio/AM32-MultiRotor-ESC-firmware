@@ -11,10 +11,10 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v4
 
       - name: Install ARM SDK
         run: make arm_sdk_install
@@ -23,13 +23,13 @@ jobs:
         run: make SURFBEE_G071
 
       - name: Upload Bin File
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: SURFBEE_G071-bin
           path: obj/*SURFBEE_G071*.bin
 
       - name: Upload Hex File
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: SURFBEE_G071-hex
           path: obj/*SURFBEE_G071*.hex
