@@ -164,6 +164,14 @@
        -fix low voltage cuttoff timeout
 *1.94  - Add selectable input types
 *1.95  - reduce timeout to 0.5 seconds when armed
+#1.96 — 2025-10-31
+	### Added
+	- **Telemetry fault signalling via eRPM “magic” values (serial telemetry):**
+	- `0xFFFF` → General fault (multiple faults may be active) → *(reserved — not emitted yet)*
+	- `0xFFFE` → Stuck-rotor
+	- `0xFFFD` → *(reserved - not emitted yet)*
+	- Normal operation continues to send real `e_rpm`. Only the **transmitted** value is modified; control-path `e_rpm` is unchanged.
+
 */
 
 #include <stdint.h>
@@ -187,7 +195,7 @@
 #endif
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 95
+#define VERSION_MINOR 96
 
 //firmware build options !! fixed speed and duty cycle modes are not to be used with sinusoidal startup !!
 
@@ -1282,14 +1290,39 @@ if(commutation_interval > 400){
 #endif // ndef brushed_mode
 
 if(send_telemetry){
-#ifdef	USE_SERIAL_TELEMETRY
-	  makeTelemPackage(degrees_celsius,
-			           battery_voltage,
-					   actual_current,
-	  				   (uint16_t)consumed_current,
-	  					e_rpm);
-	  send_telem_DMA();
-	  send_telemetry = 0;
+// #ifdef	USE_SERIAL_TELEMETRY
+// 	  makeTelemPackage(degrees_celsius,
+// 			           battery_voltage,
+// 					   actual_current,
+// 	  				   (uint16_t)consumed_current,
+// 	  					e_rpm);
+// 	  send_telem_DMA();
+// 	  send_telemetry = 0;
+// #endif
+#ifdef USE_SERIAL_TELEMETRY
+  // Build eRPM with fault sentinels for serial telemetry only.
+  // Normal e_rpm remains untouched for control.
+  bool fault_stuck    = (stuck_rotor_protection && (bemf_timeout_happened > bemf_timeout));
+  //bool fault_overtemp = (degrees_celsius > TEMPERATURE_LIMIT);
+
+  uint16_t er_tx = (uint16_t)e_rpm;  // default: real eRPM
+
+  //if (fault_stuck && fault_overtemp) {
+   //   er_tx = 0xFFFF;         // general fault (multiple faults)
+  //} else 
+  if (fault_stuck) {
+      er_tx = 0xFFFE;         // stuck-rotor
+   } //else if (fault_overtemp) {
+//       er_tx = 0xFFFD;         // over-temp
+//   }
+
+  makeTelemPackage(degrees_celsius,
+                   battery_voltage,           // V * 10 (unchanged)
+                   (uint16_t)actual_current,  // raw scaling as before
+                   (uint16_t)consumed_current,
+                   er_tx);                    // <-- magic value if faulting
+  send_telem_DMA();
+  send_telemetry = 0;
 #endif
 	}
 #if defined(FIXED_DUTY_MODE) || defined(FIXED_SPEED_MODE)
