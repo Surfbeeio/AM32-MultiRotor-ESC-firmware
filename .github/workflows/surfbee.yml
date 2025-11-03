@@ -1,35 +1,45 @@
-name: Build SURFBEE_G071, SURFBEEVP_G071
+name: Build G071 firmwares
 
 on:
-  workflow_dispatch:  # Enables manual triggering
+  workflow_dispatch:
   push:
     branches:
-      - surfbee_v1.96
+      - surfbee_v*     # change to "*surfbee_v*" to match anywhere
+
 jobs:
   build:
+    name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [SURFBEE_G071, SURFBEEVP_G071]
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
       - name: Install ARM SDK
         run: make arm_sdk_install
 
-      - name: Build SURFBEE_G071
-        run: make SURFBEE_G071
+      - name: Build ${{ matrix.target }}
+        run: make ${{ matrix.target }}
 
-      - name: Upload Bin File
+      - name: Upload BIN (${{ matrix.target }})
         uses: actions/upload-artifact@v4
         with:
-          name: SURFBEE_G071-bin
-          path: obj/*SURFBEE_G071*.bin
+          name: ${{ matrix.target }}-bin
+          path: obj/*${{ matrix.target }}*.bin
+          if-no-files-found: error
 
-      - name: Upload Hex File
+      - name: Upload HEX (${{ matrix.target }})
         uses: actions/upload-artifact@v4
         with:
-          name: SURFBEE_G071-hex
-          path: obj/*SURFBEE_G071*.hex
+          name: ${{ matrix.target }}-hex
+          path: obj/*${{ matrix.target }}*.hex
+          if-no-files-found: error
