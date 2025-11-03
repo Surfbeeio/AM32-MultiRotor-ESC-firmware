@@ -1,4 +1,4 @@
-name: Build SURFBEE_G071
+name: Build SURFBEE_G071, SURFBEEVP_G071
 
 on:
   workflow_dispatch:  # Enables manual triggering
