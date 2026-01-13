@@ -171,6 +171,9 @@
 	- `0xFFFE` → Stuck-rotor
 	- `0xFFFD` → *(reserved - not emitted yet)*
 	- Normal operation continues to send real `e_rpm`. Only the **transmitted** value is modified; control-path `e_rpm` is unchanged.
+*1.97 — 2024-06-10
+	### Added
+	- parameter to adjust voltage divider ratio for battery voltage measurement 47
 
 */
 
@@ -195,7 +198,7 @@
 #endif
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 96
+#define VERSION_MINOR 97
 
 //firmware build options !! fixed speed and duty cycle modes are not to be used with sinusoidal startup !!
 
@@ -363,6 +366,7 @@ uint16_t low_voltage_count = 0;
 uint16_t telem_ms_count;
 
 char VOLTAGE_DIVIDER = TARGET_VOLTAGE_DIVIDER;     // 100k upper and 10k lower resistor in divider
+uint8_t VOLTAGE_CAL = 100;   // percent, 100 = 1.00x
 uint16_t battery_voltage;  // scale in volts * 10.  1260 is a battery voltage of 12.60
 char cell_count = 0;
 char brushed_direction_set = 0;
@@ -775,7 +779,13 @@ void loadEEpromSettings(){
 		   servoPwm = 0;
 		   EDT_ARMED = 1;
 	   }
-
+	   // Voltage calibration (%), stored at byte 47 (0x2F).
+		// Keep this OUT of the tune area: tune starts at byte 48.
+		if (eepromBuffer[47] >= 50 && eepromBuffer[47] <= 150) {
+			VOLTAGE_CAL = eepromBuffer[47];
+		} else {
+			VOLTAGE_CAL = 100;
+		}
 
        if(motor_kv < 300){
 		   low_rpm_throttle_limit = 0;
@@ -827,6 +837,9 @@ void saveEEpromSettings(){
     	  eepromBuffer[22] = 0x00;
       }
    eepromBuffer[23] = advance_level;
+
+   eepromBuffer[47] = VOLTAGE_CAL;
+
    save_flash_nolib(eepromBuffer, 176, EEPROM_START_ADD);
 }
 
@@ -1656,8 +1669,21 @@ LL_IWDG_ReloadCounter(IWDG);
 		  ADC_raw_temp = ADC_raw_temp - (temperature_offset);
 		  converted_degrees =__LL_ADC_CALC_TEMPERATURE(3300,  ADC_raw_temp, LL_ADC_RESOLUTION_12B);
 		  degrees_celsius =((7 * degrees_celsius) + converted_degrees) >> 3;
+		  uint32_t v;
 
-          battery_voltage = ((7 * battery_voltage) + ((ADC_raw_volts * 3300 / 4095 * VOLTAGE_DIVIDER)/100)) >> 3;
+		  // v is whatever your current math produces (same units as before)
+		  v = (uint32_t)ADC_raw_volts * 3300UL;
+		  v = v / 4095UL;
+		  v = v * (uint32_t)VOLTAGE_DIVIDER;
+		  v = v / 100UL;
+
+		  // apply calibration percent
+		  v = v * (uint32_t)VOLTAGE_CAL;
+		  v = v / 100UL;
+
+		  // keep the same smoothing
+		  battery_voltage = ((7 * battery_voltage) + (uint16_t)v) >> 3;
+          //battery_voltage = ((7 * battery_voltage) + ((ADC_raw_volts * 3300 / 4095 * VOLTAGE_DIVIDER)/100)) >> 3;
           smoothed_raw_current = ((63*smoothed_raw_current + (ADC_raw_current) )>>6);
           actual_current = ((smoothed_raw_current * 3300/41) - (CURRENT_OFFSET*100))/ (MILLIVOLT_PER_AMP);
 		  if(actual_current < 0){actual_current = 0;}      
