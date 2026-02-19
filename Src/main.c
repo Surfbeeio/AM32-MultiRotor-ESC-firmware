@@ -174,9 +174,6 @@
 *1.97 — 2024-06-10
 	### Added
 	- parameter to adjust voltage divider ratio for battery voltage measurement 47
-*1.98 — 2026-02-19
-	### Added
-	- G071 ADC self-calibration at startup (~42us) for improved analog accuracy
 
 */
 
@@ -201,7 +198,7 @@
 #endif
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 98
+#define VERSION_MINOR 97
 
 //firmware build options !! fixed speed and duty cycle modes are not to be used with sinusoidal startup !!
 
