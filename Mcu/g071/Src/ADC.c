@@ -21,7 +21,7 @@ extern uint16_t ADC_raw_input;
 
 #define ADC_DELAY_CALIB_ENABLE_CPU_CYCLES  (LL_ADC_DELAY_CALIB_ENABLE_ADC_CYCLES * 64)
 
-
+static uint32_t adc_calibration_factor = 0;
 
 void ADC_DMA_Callback(){  // read dma buffer and set extern variables
 
@@ -77,50 +77,82 @@ void enableADC_DMA(){    // enables channel
                        LL_DMA_CHANNEL_2);
 }
 
-void activateADC(void)
+/*
+ * ADC_SelfCalibrate - Run ADC self-calibration at startup.
+ *
+ * Performs hardware offset calibration of the ADC analog front-end.
+ * Must be called while the ADC is disabled (before activateADC).
+ *
+ * Estimated calibration time at 64 MHz SYSCLK, ADC clock HSI16/4 = 4 MHz:
+ *   - Internal regulator stabilization:  ~20 us
+ *   - Hardware calibration (82 ADC clk): ~21 us
+ *   - Post-calibration delay:             <1 us
+ *   - Total:                             ~42 us
+ *
+ * Returns the 7-bit calibration factor (0 on failure).
+ */
+uint32_t ADC_SelfCalibrate(void)
 {
   __IO uint32_t wait_loop_index = 0U;
   __IO uint32_t backup_setting_adc_dma_transfer = 0U;
 
-  if (LL_ADC_IsEnabled(ADC1) == 0)
+  if (LL_ADC_IsEnabled(ADC1) != 0)
   {
-    /* Enable ADC internal voltage regulator */
-    LL_ADC_EnableInternalRegulator(ADC1);
-    wait_loop_index = ((LL_ADC_DELAY_INTERNAL_REGUL_STAB_US * (SystemCoreClock / (100000 * 2))) / 10);
-    while(wait_loop_index != 0)
-    {
-      wait_loop_index--;
-    }
-    backup_setting_adc_dma_transfer = LL_ADC_REG_GetDMATransfer(ADC1);
-    LL_ADC_REG_SetDMATransfer(ADC1, LL_ADC_REG_DMA_TRANSFER_NONE);
-
-    /* Run ADC self calibration */
-    LL_ADC_StartCalibration(ADC1);
-
-    /* Poll for ADC effectively calibrated */
-
-    while (LL_ADC_IsCalibrationOnGoing(ADC1) != 0)
-    {
-   }
-    /* Restore ADC DMA transfer request after calibration */
-    LL_ADC_REG_SetDMATransfer(ADC1, backup_setting_adc_dma_transfer);
-
-    /* Delay between ADC end of calibration and ADC enable.                   */
-    /* Note: Variable divided by 2 to compensate partially                    */
-    /*       CPU processing cycles (depends on compilation optimization).     */
-    wait_loop_index = (ADC_DELAY_CALIB_ENABLE_CPU_CYCLES >> 1);
-    while(wait_loop_index != 0)
-    {
-      wait_loop_index--;
-    }
-    /* Enable ADC */
-    LL_ADC_Enable(ADC1);
-   while (LL_ADC_IsActiveFlag_ADRDY(ADC1) == 0)
-    {
-    }
-   ADC->CCR |= ADC_CCR_TSEN;
+    return 0;  /* ADC must be disabled for calibration */
   }
 
+  /* Enable ADC internal voltage regulator */
+  LL_ADC_EnableInternalRegulator(ADC1);
+  wait_loop_index = ((LL_ADC_DELAY_INTERNAL_REGUL_STAB_US * (SystemCoreClock / (100000 * 2))) / 10);
+  while(wait_loop_index != 0)
+  {
+    wait_loop_index--;
+  }
+
+  /* Disable DMA during calibration to prevent corrupted transfer */
+  backup_setting_adc_dma_transfer = LL_ADC_REG_GetDMATransfer(ADC1);
+  LL_ADC_REG_SetDMATransfer(ADC1, LL_ADC_REG_DMA_TRANSFER_NONE);
+
+  /* Run ADC self-calibration */
+  LL_ADC_StartCalibration(ADC1);
+
+  /* Poll until calibration completes */
+  while (LL_ADC_IsCalibrationOnGoing(ADC1) != 0)
+  {
+  }
+
+  /* Read back calibration factor for verification */
+  adc_calibration_factor = LL_ADC_GetCalibrationFactor(ADC1);
+
+  /* Restore ADC DMA transfer request after calibration */
+  LL_ADC_REG_SetDMATransfer(ADC1, backup_setting_adc_dma_transfer);
+
+  /* Delay between ADC end of calibration and ADC enable.                   */
+  /* Note: Variable divided by 2 to compensate partially                    */
+  /*       CPU processing cycles (depends on compilation optimization).     */
+  wait_loop_index = (ADC_DELAY_CALIB_ENABLE_CPU_CYCLES >> 1);
+  while(wait_loop_index != 0)
+  {
+    wait_loop_index--;
+  }
+
+  return adc_calibration_factor;
+}
+
+void activateADC(void)
+{
+  if (LL_ADC_IsEnabled(ADC1) == 0)
+  {
+    /* Run self-calibration before enabling ADC */
+    ADC_SelfCalibrate();
+
+    /* Enable ADC */
+    LL_ADC_Enable(ADC1);
+    while (LL_ADC_IsActiveFlag_ADRDY(ADC1) == 0)
+    {
+    }
+    ADC->CCR |= ADC_CCR_TSEN;
+  }
 }
 void ADC_Init(void)
 {

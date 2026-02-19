@@ -16,6 +16,7 @@
 
 void ADC_DMA_Callback();
 void enableADC_DMA();
+uint32_t ADC_SelfCalibrate(void);
 void activateADC();
 void ADC_Init(void);
 
