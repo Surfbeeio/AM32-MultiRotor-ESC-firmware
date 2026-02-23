@@ -200,6 +200,10 @@
 //#define BRUSHED_MODE         // overrides all brushless config settings, enables two channels for brushed control
 //#define GIMBAL_MODE     // also sinusoidal_startup needs to be on, maps input to sinusoidal angle.
 
+#define PERMANENT_SINE_MODE  // stays in sinusoidal commutation permanently, for direct drive applications
+                              // maps full throttle range to sine mode speed, never transitions to BEMF
+                              // uses motor_kv and motor_poles from EEPROM to calculate max eRPM safety limit
+
 //===========================================================================
 //=============================  Defaults =============================
 //===========================================================================
@@ -269,6 +273,12 @@ uint16_t stall_protect_target_interval = TARGET_STALL_PROTECTION_INTERVAL;
 char USE_HALL_SENSOR = 0;
 uint16_t enter_sine_angle = 180;
 char do_once_sinemode= 0;
+
+#ifdef PERMANENT_SINE_MODE
+uint16_t sine_max_erpm = 3000;           // maximum electrical RPM safety limit, calculated from motor_kv at boot
+uint8_t effective_sine_power = 5;        // runtime sine power after protection derating (1-10)
+uint16_t sine_min_step_delay = 50;       // minimum step delay (max speed), calculated from sine_max_erpm
+#endif
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -1375,6 +1385,10 @@ if (!forward){
     TIM1->CCR1 = ((2*pwmSin[phase_A_position])+gate_drive_offset)*TIMER1_MAX_ARR/2000;
     TIM1->CCR2 = ((2*pwmSin[phase_B_position])+gate_drive_offset)*TIMER1_MAX_ARR/2000;
     TIM1->CCR3 = ((2*pwmSin[phase_C_position])+gate_drive_offset)*TIMER1_MAX_ARR/2000;
+#elif defined(PERMANENT_SINE_MODE)
+    TIM1->CCR1 = (((2*pwmSin[phase_A_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*effective_sine_power / 10;
+    TIM1->CCR2 = (((2*pwmSin[phase_B_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*effective_sine_power / 10;
+    TIM1->CCR3 = (((2*pwmSin[phase_C_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*effective_sine_power / 10;
 #else
     TIM1->CCR1 = (((2*pwmSin[phase_A_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*sine_mode_power / 10;
     TIM1->CCR2 = (((2*pwmSin[phase_B_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*sine_mode_power / 10;
@@ -1537,6 +1551,31 @@ loadEEpromSettings();
 		stall_protect_minimum_duty = stall_protect_minimum_duty + 50;
 		min_startup_duty = min_startup_duty + 50;
 	}
+
+#ifdef PERMANENT_SINE_MODE
+	use_sin_start = 1;     // force sine mode on
+	comp_pwm = 1;          // sine mode requires complementary pwm
+	stepper_sine = 1;      // start in sine stepper mode
+	bi_direction = 0;      // not compatible with permanent sine
+	RC_CAR_REVERSE = 0;
+	effective_sine_power = sine_mode_power;
+	// calculate max eRPM from motor_kv and motor_poles
+	// assumes ~30V max battery (7S) as conservative ceiling
+	// eRPM = mechanical_RPM * pole_pairs = kv * voltage * (poles/2)
+	// sine_max_erpm is in hundreds (matching sine mode e_rpm units: e_rpm = 600/step_delay)
+	sine_max_erpm = (uint16_t)((uint32_t)motor_kv * 30 * (motor_poles / 2) / 100);
+	if(sine_max_erpm < 10){
+		sine_max_erpm = 10;  // minimum 1000 eRPM
+	}
+	if(sine_max_erpm > 600){
+		sine_max_erpm = 600; // cap at 60000 eRPM
+	}
+	// calculate minimum step delay from max eRPM (step_delay = 600 / e_rpm_hundreds)
+	sine_min_step_delay = 600 / sine_max_erpm;
+	if(sine_min_step_delay < 2){
+		sine_min_step_delay = 2;  // absolute minimum to avoid timer issues
+	}
+#endif
 
 #ifdef MCU_F031
 	  GPIOF->BSRR = LL_GPIO_PIN_6;            // uncomment to take bridge out of standby mode and set oc level
@@ -1827,6 +1866,15 @@ if(newinput > 2000){
   			input = FIXED_DUTY_MODE_POWER * 20 + 47;
 #else
 	  	  	if(use_sin_start){
+#ifdef PERMANENT_SINE_MODE
+  				if(adjusted_input < 30){           // dead band
+  					input = 0;
+  				}else{
+  					// map full throttle range to sine stepper input (49-136)
+  					// stays entirely within sine mode, never reaches 137+ BEMF handoff
+  					input = map(adjusted_input, 30, 2047, 49, 136);
+  				}
+#else
   				if(adjusted_input < 30){           // dead band ?
   					input= 0;
   					}
@@ -1837,6 +1885,7 @@ if(newinput > 2000){
   					if(adjusted_input >= (sine_mode_changeover_thottle_level * 20)){
   					input = map(adjusted_input , (sine_mode_changeover_thottle_level * 20) ,2047 , 160, 2047);
   					}
+#endif
   				}else{
   					if(use_speed_control_loop){
   					  if (drive_by_rpm){
@@ -1971,7 +2020,78 @@ if (old_routine && running){
 	 				}
 #else
 
+#ifdef PERMANENT_SINE_MODE
 
+if(input > 48 && armed){
+
+	if(do_once_sinemode){
+		COM_TIMER->DIER &= ~((0x1UL << (0U)));  // disable commutation interrupt in case set
+		maskPhaseInterrupts();
+		TIM1->CCR1 = 0;
+		TIM1->CCR2 = 0;
+		TIM1->CCR3 = 0;
+		allpwm();
+		do_once_sinemode = 0;
+	}
+
+	// apply temperature protection: derate sine power when over limit
+	effective_sine_power = sine_mode_power;
+	if(TEMPERATURE_LIMIT != 255 && degrees_celsius > TEMPERATURE_LIMIT){
+		uint8_t temp_derate = map(degrees_celsius, TEMPERATURE_LIMIT, TEMPERATURE_LIMIT + 20, sine_mode_power, 1);
+		if(temp_derate < effective_sine_power){
+			effective_sine_power = temp_derate;
+		}
+	}
+
+	// apply current limit protection: derate sine power when over limit
+	if(use_current_limit && actual_current > (int16_t)(CURRENT_LIMIT * 100)){
+		uint8_t current_derate = map(actual_current, CURRENT_LIMIT * 100, CURRENT_LIMIT * 200, sine_mode_power, 1);
+		if(current_derate < effective_sine_power){
+			effective_sine_power = current_derate;
+		}
+	}
+
+	if(effective_sine_power < 1){
+		effective_sine_power = 1;
+	}
+
+	// map full throttle input range to step delay
+	// input 49-136 mapped to step delay from slow (7000/poles) to fast (sine_min_step_delay)
+	step_delay = map(input, 49, 136, 7000 / motor_poles, sine_min_step_delay);
+
+	// enforce eRPM safety limit
+	if(step_delay < sine_min_step_delay){
+		step_delay = sine_min_step_delay;
+	}
+
+	advanceincrement();
+	delayMicros(step_delay);
+	e_rpm = 600 / step_delay;         // in hundreds so 33 e_rpm is 3300 actual erpm
+
+}else{
+	do_once_sinemode = 1;
+	e_rpm = 0;
+	if(brake_on_stop){
+#ifndef PWM_ENABLE_BRIDGE
+		duty_cycle = (TIMER1_MAX_ARR-19) + drag_brake_strength*2;
+		adjusted_duty_cycle = TIMER1_MAX_ARR - ((duty_cycle * tim1_arr)/TIMER1_MAX_ARR)+1;
+		proportionalBrake();
+		TIM1->CCR1 = adjusted_duty_cycle;
+		TIM1->CCR2 = adjusted_duty_cycle;
+		TIM1->CCR3 = adjusted_duty_cycle;
+		prop_brake_active = 1;
+#else
+		// todo add braking for PWM /enable style bridges.
+#endif
+	}else{
+		TIM1->CCR1 = 0;
+		TIM1->CCR2 = 0;
+		TIM1->CCR3 = 0;
+		allOff();
+	}
+}
+
+#else  // original sine startup mode (not permanent)
 
 if(input > 48 && armed){
 
@@ -2032,7 +2152,7 @@ proportionalBrake();
 	TIM1->CCR1 = adjusted_duty_cycle;
 	TIM1->CCR2 = adjusted_duty_cycle;
 	TIM1->CCR3 = adjusted_duty_cycle;
-	
+
 	prop_brake_active = 1;
 #else
 		// todo add braking for PWM /enable style bridges.
@@ -2044,6 +2164,8 @@ proportionalBrake();
 	allOff();
 	}
 }
+
+#endif  // PERMANENT_SINE_MODE
 
 #endif      // gimbal mode
 	 }  // stepper/sine mode end
