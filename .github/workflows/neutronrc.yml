@@ -1,7 +1,8 @@
-name: Build SURFBEE_G071
+name: Build NEUTRONRC_G071
 
 on:
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,17 +17,17 @@ jobs:
       - name: Install ARM SDK
         run: make arm_sdk_install
 
-      - name: Build SURFBEE_G071
-        run: make SURFBEE_G071
+      - name: Build NEUTRONRC_G071
+        run: make NEUTRONRC_G071
 
       - name: Upload Bin File
         uses: actions/upload-artifact@v4
         with:
-          name: SURFBEE_G071-bin
-          path: obj/*SURFBEE_G071*.bin
+          name: NEUTRONRC_G071-bin
+          path: obj/*NEUTRONRC_G071*.bin
 
       - name: Upload Hex File
         uses: actions/upload-artifact@v4
         with:
-          name: SURFBEE_G071-hex
-          path: obj/*SURFBEE_G071*.hex
+          name: NEUTRONRC_G071-hex
+          path: obj/*NEUTRONRC_G071*.hex
