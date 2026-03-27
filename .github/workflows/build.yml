@@ -1,12 +1,6 @@
 name: Build AM32 F051 Firmware
 
 on:
-  # Triggers the workflow on push or pull request events but only for the master branch
-  push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
-
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -16,10 +10,12 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v1
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
 
       - name: Install ARM SDK
         run: make arm_sdk_install
@@ -45,13 +41,13 @@ jobs:
         run: make all
 
       - name: Upload Bin Files
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.ARTIFACT_NAME }}-BIN
           path: obj/*.bin
       
       - name: Upload Hex Files
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ env.ARTIFACT_NAME }}-HEX
           path: obj/*.hex
