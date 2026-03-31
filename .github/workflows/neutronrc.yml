@@ -1,0 +1,35 @@
+name: Build NEUTRONRC_G071
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install ARM SDK
+        run: make arm_sdk_install
+
+      - name: Build NEUTRONRC_G071
+        run: make NEUTRONRC_G071
+
+      - name: Upload Bin File
+        uses: actions/upload-artifact@v6
+        with:
+          name: NEUTRONRC_G071-bin
+          path: obj/*NEUTRONRC_G071*.bin
+
+      - name: Upload Hex File
+        uses: actions/upload-artifact@v6
+        with:
+          name: NEUTRONRC_G071-hex
+          path: obj/*NEUTRONRC_G071*.hex
