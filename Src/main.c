@@ -271,6 +271,7 @@ uint16_t enter_sine_angle = 180;
 char do_once_sinemode= 0;
 
 #define SINE_INPUT_MAX 1024
+#define BRAKE_ON_STOP_TIMEOUT_TICKS 30000
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -419,6 +420,7 @@ uint8_t adc_counter = 0;
 char send_telemetry = 0;
 char telemetry_done = 0;
 char prop_brake_active = 0;
+uint16_t brake_on_stop_timeout_count = 0;
 
 uint8_t eepromBuffer[176] ={0};
 
@@ -1128,7 +1130,7 @@ if(!armed && (cell_count == 0)){
 			if(!running){
 				old_routine = 1;
 				zero_crosses = 0;
-				  if(brake_on_stop){
+				  if(stop_brake_enabled){
 					  fullBrake();
 				  }else{
 					  if(!prop_brake_active){
@@ -1152,7 +1154,7 @@ if(!armed && (cell_count == 0)){
 			  old_routine = 1;
 			  zero_crosses = 0;
 			  bad_count = 0;
-			  	  if(brake_on_stop){
+			  	  if(stop_brake_enabled){
 			  		  if(!use_sin_start){
 #ifndef PWM_ENABLE_BRIDGE				
 			  			  duty_cycle = (TIMER1_MAX_ARR-19) + drag_brake_strength*2;
@@ -1785,6 +1787,19 @@ if(newinput > 2000){
  			  adjusted_input = newinput;
  		  }
 
+		  if(brake_on_stop && armed && adjusted_input == 0){
+			  if(brake_on_stop_timeout_count < BRAKE_ON_STOP_TIMEOUT_TICKS){
+				  brake_on_stop_timeout_count++;
+			  }else if(prop_brake_active){
+				  allOff();
+				  prop_brake_active = 0;
+			  }
+		  }else{
+			  brake_on_stop_timeout_count = 0;
+		  }
+
+		  char stop_brake_enabled = brake_on_stop && (brake_on_stop_timeout_count < BRAKE_ON_STOP_TIMEOUT_TICKS);
+
 #ifndef BRUSHED_MODE
 
 	 	 if ((zero_crosses > 1000) || (adjusted_input == 0)){
@@ -2028,7 +2043,7 @@ if(input > 48 && armed){
 
 }else{
 	do_once_sinemode = 1;
-	if(brake_on_stop){
+	if(stop_brake_enabled){
 #ifndef PWM_ENABLE_BRIDGE
 	duty_cycle = (TIMER1_MAX_ARR-19) + drag_brake_strength*2;
 	adjusted_duty_cycle = TIMER1_MAX_ARR - ((duty_cycle * tim1_arr)/TIMER1_MAX_ARR)+1;
