@@ -269,6 +269,8 @@ uint16_t stall_protect_target_interval = TARGET_STALL_PROTECTION_INTERVAL;
 char USE_HALL_SENSOR = 0;
 uint16_t enter_sine_angle = 180;
 char do_once_sinemode= 0;
+
+#define SINE_INPUT_MAX 1024
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -1779,9 +1781,10 @@ if(newinput > 2000){
   			  }
 
 
-  		  }else{
-  			  adjusted_input = newinput;
-  		  }
+ 		  }else{
+ 			  adjusted_input = newinput;
+ 		  }
+
 #ifndef BRUSHED_MODE
 
 	 	 if ((zero_crosses > 1000) || (adjusted_input == 0)){
@@ -1827,16 +1830,17 @@ if(newinput > 2000){
   			input = FIXED_DUTY_MODE_POWER * 20 + 47;
 #else
 	  	  	if(use_sin_start){
-  				if(adjusted_input < 30){           // dead band ?
-  					input= 0;
-  					}
+  				uint16_t sine_adjusted_input = map(adjusted_input, 0, 2047, 0, SINE_INPUT_MAX);
+				if(sine_adjusted_input < 30){           // dead band ?
+					input= 0;
+					}
 
-  					if(adjusted_input > 30 && adjusted_input < (sine_mode_changeover_thottle_level * 20)){
-  					input= map(adjusted_input, 30 , (sine_mode_changeover_thottle_level * 20) , 47 ,160);
-  					}
-  					if(adjusted_input >= (sine_mode_changeover_thottle_level * 20)){
-  					input = map(adjusted_input , (sine_mode_changeover_thottle_level * 20) ,2047 , 160, 2047);
-  					}
+					if(sine_adjusted_input > 30 && sine_adjusted_input < (sine_mode_changeover_thottle_level * 20)){
+					input= map(sine_adjusted_input, 30 , (sine_mode_changeover_thottle_level * 20) , 47 ,160);
+					}
+					if(sine_adjusted_input >= (sine_mode_changeover_thottle_level * 20)){
+					input = map(sine_adjusted_input , (sine_mode_changeover_thottle_level * 20) ,SINE_INPUT_MAX , 160, SINE_INPUT_MAX);
+					}
   				}else{
   					if(use_speed_control_loop){
   					  if (drive_by_rpm){
