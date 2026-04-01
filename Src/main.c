@@ -423,13 +423,18 @@ char prop_brake_active = 0;
 char stop_brake_enabled = 0;
 uint16_t brake_on_stop_timeout_count = 0;
 
-#ifdef USE_RGB_LED
-static inline void setBrakeLedIndicator(char brake_active)
+#ifdef USE_LED_STRIP
+uint8_t led_strip_red = 0;
+uint8_t led_strip_green = 0;
+uint8_t led_strip_blue = 0;
+
+static inline void updateLedStripColor(uint8_t red, uint8_t green, uint8_t blue)
 {
-	if(brake_active){
-		GPIOB->BRR = LL_GPIO_PIN_3;
-	}else{
-		GPIOB->BSRR = LL_GPIO_PIN_3;
+	if((led_strip_red != red) || (led_strip_green != green) || (led_strip_blue != blue)){
+		led_strip_red = red;
+		led_strip_green = green;
+		led_strip_blue = blue;
+		send_LED_RGB(red, green, blue);
 	}
 }
 #endif
@@ -1045,13 +1050,12 @@ if(!armed && (cell_count == 0)){
 				#ifdef USE_LED_STRIP
 			//	send_LED_RGB(0,0,0);
 				delayMicros(1000);
-				send_LED_RGB(0,255,0);
+				updateLedStripColor(0,255,0);
 				#endif
 				#ifdef USE_RGB_LED
 				  			GPIOB->BRR = LL_GPIO_PIN_3;    // turn on green
 				  			GPIOB->BSRR = LL_GPIO_PIN_8;   // turn on green
 				  			GPIOB->BSRR = LL_GPIO_PIN_5;
-				  			setBrakeLedIndicator(prop_brake_active);
 				#endif
 				  			if((cell_count == 0) && LOW_VOLTAGE_CUTOFF){
 				  			  cell_count = battery_voltage / 370;
@@ -1125,9 +1129,6 @@ if(!armed && (cell_count == 0)){
 	  }
 	  if(!RC_CAR_REVERSE){
 		  prop_brake_active = 0;
-#ifdef USE_RGB_LED
-		  setBrakeLedIndicator(prop_brake_active);
-#endif
 	  }
 	  }
 	  if (input < 47 + (80*use_sin_start)){
@@ -1148,15 +1149,9 @@ if(!armed && (cell_count == 0)){
 				zero_crosses = 0;
 				  if(stop_brake_enabled){
 					  fullBrake();
-#ifdef USE_RGB_LED
-					  setBrakeLedIndicator(1);
-#endif
 				  }else{
 					  if(!prop_brake_active){
 					  allOff();
-#ifdef USE_RGB_LED
-					  setBrakeLedIndicator(0);
-#endif
 					  }
 				  }
 			}
@@ -1182,9 +1177,6 @@ if(!armed && (cell_count == 0)){
 			  			  duty_cycle = (TIMER1_MAX_ARR-19) + drag_brake_strength*2;
 			  			  proportionalBrake();
 			  			  prop_brake_active = 1;
-#ifdef USE_RGB_LED
-			  			  setBrakeLedIndicator(prop_brake_active);
-#endif
 #else
 	//todo add proportional braking for pwm/enable style bridge.
 #endif
@@ -1479,14 +1471,14 @@ int main(void)
 
 
 #ifdef USE_LED_STRIP
-send_LED_RGB(255,0,0);
+updateLedStripColor(255,0,0);
 #endif
 
 #ifdef USE_RGB_LED
   LED_GPIO_init();
   GPIOB->BRR = LL_GPIO_PIN_8; // turn on red
   GPIOB->BSRR = LL_GPIO_PIN_5;
-  setBrakeLedIndicator(0);
+  GPIOB->BSRR = LL_GPIO_PIN_3; //
 #endif
 
 #ifndef BRUSHED_MODE
@@ -1703,9 +1695,6 @@ if(newinput > 2000){
   						  adjusted_input = 0;
 						  if(running){
 							  prop_brake_active = 1;
-#ifdef USE_RGB_LED
-							  setBrakeLedIndicator(prop_brake_active);
-#endif
 						  }else{
   							  forward = 1 - dir_reversed;
   						  }
@@ -1718,9 +1707,6 @@ if(newinput > 2000){
   					  if (forward == (1 - dir_reversed)) {
 						  if(running){
 							  prop_brake_active = 1;
-#ifdef USE_RGB_LED
-							  setBrakeLedIndicator(prop_brake_active);
-#endif
 						  }else{
   							  forward = dir_reversed;
   						  }
@@ -1736,9 +1722,6 @@ if(newinput > 2000){
 				  if (newinput >= (1000 - (servo_dead_band << 1)) && newinput <= (1000 + (servo_dead_band <<1))) {
 					  adjusted_input = 0;
 					  prop_brake_active = 0;
-#ifdef USE_RGB_LED
-					  setBrakeLedIndicator(prop_brake_active);
-#endif
 				  }
   			  }else{
   				  if (newinput > (1000 + (servo_dead_band<<1))) {
@@ -1827,9 +1810,6 @@ if(newinput > 2000){
 			  }else if(prop_brake_active){
 				  allOff();
 				  prop_brake_active = 0;
-#ifdef USE_RGB_LED
-				  setBrakeLedIndicator(prop_brake_active);
-#endif
 			  }
 		  }else{
 			  brake_on_stop_timeout_count = 0;
@@ -1841,11 +1821,22 @@ if(newinput > 2000){
 
 	 	 if ((zero_crosses > 1000) || (adjusted_input == 0)){
  	 		bemf_timeout_happened = 0;
+#ifdef USE_LED_STRIP
+	 		if(adjusted_input == 0 && armed){
+	 			if(stop_brake_enabled && !comp_pwm && !running){
+	 				updateLedStripColor(0,0,255);
+	 			}else if(prop_brake_active){
+	 				updateLedStripColor(0,255,255);
+	 			}else{
+	 				updateLedStripColor(0,255,0);
+	 			}
+	 		}
+#endif
 #ifdef USE_RGB_LED
 	 		if(adjusted_input == 0 && armed){
 			  GPIOB->BSRR = LL_GPIO_PIN_8; // off red
 			  GPIOB->BRR = LL_GPIO_PIN_5;  // on green
-			  setBrakeLedIndicator(stop_brake_enabled);
+			  GPIOB->BSRR = LL_GPIO_PIN_3;  //off blue
 	 		}
 #endif
  	 	 }
@@ -1875,7 +1866,7 @@ if(newinput > 2000){
 #ifdef USE_RGB_LED
 			  GPIOB->BRR = LL_GPIO_PIN_8; // on red
 			  GPIOB->BSRR = LL_GPIO_PIN_5;  //
-			  setBrakeLedIndicator(stop_brake_enabled);
+			  GPIOB->BSRR = LL_GPIO_PIN_3;
 #endif
 	 	  }else{
 #ifdef FIXED_DUTY_MODE
@@ -2066,9 +2057,6 @@ if(input > 48 && armed){
 		 		  INTERVAL_TIMER->CNT = 9000;
 				  zero_crosses = 10;
 				  prop_brake_active = 0;
-#ifdef USE_RGB_LED
-				  setBrakeLedIndicator(prop_brake_active);
-#endif
 	 			  step = changeover_step;                    // rising bemf on a same as position 0.
 		 		// comStep(step);// rising bemf on a same as position 0.
 				if(stall_protection){
@@ -2093,9 +2081,6 @@ if(input > 48 && armed){
 	TIM1->CCR3 = adjusted_duty_cycle;
 	
 	prop_brake_active = 1;
-#ifdef USE_RGB_LED
-	setBrakeLedIndicator(prop_brake_active);
-#endif
 #else
 		// todo add braking for PWM /enable style bridges.
 #endif
@@ -2104,9 +2089,6 @@ if(input > 48 && armed){
 	TIM1->CCR2 = 0;
 	TIM1->CCR3 = 0;
 	allOff();
-#ifdef USE_RGB_LED
-	setBrakeLedIndicator(0);
-#endif
 	}
 }
 
