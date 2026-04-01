@@ -420,6 +420,9 @@ uint8_t adc_counter = 0;
 char send_telemetry = 0;
 char telemetry_done = 0;
 char prop_brake_active = 0;
+char actual_brake_active = 0;
+char actual_full_brake_active = 0;
+char actual_all_off_active = 0;
 char stop_brake_enabled = 0;
 uint16_t brake_on_stop_timeout_count = 0;
 
@@ -1017,6 +1020,9 @@ void startMotor() {
 
 void tenKhzRoutine(){
 
+	actual_brake_active = 0;
+	actual_full_brake_active = 0;
+	actual_all_off_active = 0;
 
 	tenkhzcounter++;
 	if(tenkhzcounter > 10000){      // 1s sample interval 10000
@@ -1149,9 +1155,12 @@ if(!armed && (cell_count == 0)){
 				zero_crosses = 0;
 				  if(stop_brake_enabled){
 					  fullBrake();
+					  actual_brake_active = 1;
+					  actual_full_brake_active = 1;
 				  }else{
 					  if(!prop_brake_active){
 					  allOff();
+					  actual_all_off_active = 1;
 					  }
 				  }
 			}
@@ -1160,8 +1169,11 @@ if(!armed && (cell_count == 0)){
 					duty_cycle = getAbsDif(1000, newinput) + 1000;
 					if(duty_cycle == 2000){
 						fullBrake();
+						actual_brake_active = 1;
+						actual_full_brake_active = 1;
 					}else{
 						proportionalBrake();
+						actual_brake_active = 1;
 					}
 #endif
 					}
@@ -1176,6 +1188,7 @@ if(!armed && (cell_count == 0)){
 #ifndef PWM_ENABLE_BRIDGE				
 			  			  duty_cycle = (TIMER1_MAX_ARR-19) + drag_brake_strength*2;
 			  			  proportionalBrake();
+			  			  actual_brake_active = 1;
 			  			  prop_brake_active = 1;
 #else
 	//todo add proportional braking for pwm/enable style bridge.
@@ -1183,6 +1196,7 @@ if(!armed && (cell_count == 0)){
 			  		  }
 			  	  }else{
 			  		  allOff();
+			  		  actual_all_off_active = 1;
 			  		  duty_cycle = 0;
 			  	  }
 		  }
@@ -1809,6 +1823,7 @@ if(newinput > 2000){
 				  brake_on_stop_timeout_count++;
 			  }else if(prop_brake_active){
 				  allOff();
+				  actual_all_off_active = 1;
 				  prop_brake_active = 0;
 			  }
 		  }else{
@@ -1823,10 +1838,12 @@ if(newinput > 2000){
  	 		bemf_timeout_happened = 0;
 #ifdef USE_LED_STRIP
 	 		if(adjusted_input == 0 && armed){
-	 			if(stop_brake_enabled && !comp_pwm && !running){
+	 			if(actual_full_brake_active){
 	 				updateLedStripColor(0,0,255);
-	 			}else if(prop_brake_active){
+	 			}else if(actual_brake_active){
 	 				updateLedStripColor(0,255,255);
+	 			}else if(actual_all_off_active){
+	 				updateLedStripColor(255,128,0);
 	 			}else{
 	 				updateLedStripColor(0,255,0);
 	 			}
@@ -2076,6 +2093,7 @@ if(input > 48 && armed){
 	duty_cycle = (TIMER1_MAX_ARR-19) + drag_brake_strength*2;
 	adjusted_duty_cycle = TIMER1_MAX_ARR - ((duty_cycle * tim1_arr)/TIMER1_MAX_ARR)+1;
 	proportionalBrake();
+	actual_brake_active = 1;
 	TIM1->CCR1 = adjusted_duty_cycle;
 	TIM1->CCR2 = adjusted_duty_cycle;
 	TIM1->CCR3 = adjusted_duty_cycle;
@@ -2089,6 +2107,7 @@ if(input > 48 && armed){
 	TIM1->CCR2 = 0;
 	TIM1->CCR3 = 0;
 	allOff();
+	actual_all_off_active = 1;
 	}
 }
 
