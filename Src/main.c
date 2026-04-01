@@ -1836,19 +1836,6 @@ if(newinput > 2000){
 
 	 	 if ((zero_crosses > 1000) || (adjusted_input == 0)){
  	 		bemf_timeout_happened = 0;
-#ifdef USE_LED_STRIP
-	 		if(adjusted_input == 0 && armed){
-	 			if(actual_full_brake_active){
-	 				updateLedStripColor(0,0,255);
-	 			}else if(actual_brake_active){
-	 				updateLedStripColor(0,255,255);
-	 			}else if(actual_all_off_active){
-	 				updateLedStripColor(255,128,0);
-	 			}else{
-	 				updateLedStripColor(0,255,0);
-	 			}
-	 		}
-#endif
 #ifdef USE_RGB_LED
 	 		if(adjusted_input == 0 && armed){
 			  GPIOB->BSRR = LL_GPIO_PIN_8; // off red
@@ -2147,6 +2134,20 @@ if(input > 48 && armed){
 	  			}
 #endif
   		}
+
+#ifdef USE_LED_STRIP
+		if(adjusted_input == 0 && armed){
+			if(actual_full_brake_active){
+				updateLedStripColor(0,0,255);
+			}else if(actual_brake_active){
+				updateLedStripColor(0,255,255);
+			}else if(actual_all_off_active){
+				updateLedStripColor(255,128,0);
+			}else{
+				updateLedStripColor(0,255,0);
+			}
+		}
+#endif
 }
 
 
