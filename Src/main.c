@@ -420,6 +420,7 @@ uint8_t adc_counter = 0;
 char send_telemetry = 0;
 char telemetry_done = 0;
 char prop_brake_active = 0;
+char stop_brake_enabled = 0;
 uint16_t brake_on_stop_timeout_count = 0;
 
 uint8_t eepromBuffer[176] ={0};
@@ -1798,7 +1799,7 @@ if(newinput > 2000){
 			  brake_on_stop_timeout_count = 0;
 		  }
 
-		  char stop_brake_enabled = brake_on_stop && (brake_on_stop_timeout_count < BRAKE_ON_STOP_TIMEOUT_TICKS);
+		  stop_brake_enabled = brake_on_stop && (brake_on_stop_timeout_count < BRAKE_ON_STOP_TIMEOUT_TICKS);
 
 #ifndef BRUSHED_MODE
 
