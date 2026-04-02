@@ -271,7 +271,6 @@ uint16_t enter_sine_angle = 180;
 char do_once_sinemode= 0;
 
 #define SINE_INPUT_MAX 1024
-#define BRAKE_ON_STOP_TIMEOUT_TICKS 30000
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -420,27 +419,6 @@ uint8_t adc_counter = 0;
 char send_telemetry = 0;
 char telemetry_done = 0;
 char prop_brake_active = 0;
-char actual_brake_active = 0;
-char actual_full_brake_active = 0;
-char actual_all_off_active = 0;
-char stop_brake_enabled = 0;
-uint16_t brake_on_stop_timeout_count = 0;
-
-#ifdef USE_LED_STRIP
-uint8_t led_strip_red = 0;
-uint8_t led_strip_green = 0;
-uint8_t led_strip_blue = 0;
-
-static inline void updateLedStripColor(uint8_t red, uint8_t green, uint8_t blue)
-{
-	if((led_strip_red != red) || (led_strip_green != green) || (led_strip_blue != blue)){
-		led_strip_red = red;
-		led_strip_green = green;
-		led_strip_blue = blue;
-		send_LED_RGB(red, green, blue);
-	}
-}
-#endif
 
 uint8_t eepromBuffer[176] ={0};
 
@@ -1020,10 +998,6 @@ void startMotor() {
 
 void tenKhzRoutine(){
 
-	actual_brake_active = 0;
-	actual_full_brake_active = 0;
-	actual_all_off_active = 0;
-
 	tenkhzcounter++;
 	if(tenkhzcounter > 10000){      // 1s sample interval 10000
 		consumed_current = (float)actual_current/360 + consumed_current;
@@ -1056,7 +1030,7 @@ if(!armed && (cell_count == 0)){
 				#ifdef USE_LED_STRIP
 			//	send_LED_RGB(0,0,0);
 				delayMicros(1000);
-				updateLedStripColor(0,255,0);
+				send_LED_RGB(0,255,0); //sets led green for armed
 				#endif
 				#ifdef USE_RGB_LED
 				  			GPIOB->BRR = LL_GPIO_PIN_3;    // turn on green
@@ -1153,14 +1127,11 @@ if(!armed && (cell_count == 0)){
 			if(!running){
 				old_routine = 1;
 				zero_crosses = 0;
-				  if(stop_brake_enabled){
+				  if(brake_on_stop){
 					  fullBrake();
-					  actual_brake_active = 1;
-					  actual_full_brake_active = 1;
 				  }else{
 					  if(!prop_brake_active){
 					  allOff();
-					  actual_all_off_active = 1;
 					  }
 				  }
 			}
@@ -1169,11 +1140,8 @@ if(!armed && (cell_count == 0)){
 					duty_cycle = getAbsDif(1000, newinput) + 1000;
 					if(duty_cycle == 2000){
 						fullBrake();
-						actual_brake_active = 1;
-						actual_full_brake_active = 1;
 					}else{
 						proportionalBrake();
-						actual_brake_active = 1;
 					}
 #endif
 					}
@@ -1183,12 +1151,11 @@ if(!armed && (cell_count == 0)){
 			  old_routine = 1;
 			  zero_crosses = 0;
 			  bad_count = 0;
-			  	  if(stop_brake_enabled){
+			  	  if(brake_on_stop){
 			  		  if(!use_sin_start){
 #ifndef PWM_ENABLE_BRIDGE				
 			  			  duty_cycle = (TIMER1_MAX_ARR-19) + drag_brake_strength*2;
 			  			  proportionalBrake();
-			  			  actual_brake_active = 1;
 			  			  prop_brake_active = 1;
 #else
 	//todo add proportional braking for pwm/enable style bridge.
@@ -1196,7 +1163,6 @@ if(!armed && (cell_count == 0)){
 			  		  }
 			  	  }else{
 			  		  allOff();
-			  		  actual_all_off_active = 1;
 			  		  duty_cycle = 0;
 			  	  }
 		  }
@@ -1485,7 +1451,7 @@ int main(void)
 
 
 #ifdef USE_LED_STRIP
-updateLedStripColor(255,0,0);
+send_LED_RGB(255,0,0); // set read for disarmed 
 #endif
 
 #ifdef USE_RGB_LED
@@ -1818,24 +1784,15 @@ if(newinput > 2000){
  			  adjusted_input = newinput;
  		  }
 
-		  if(brake_on_stop && armed && adjusted_input == 0){
-			  if(brake_on_stop_timeout_count < BRAKE_ON_STOP_TIMEOUT_TICKS){
-				  brake_on_stop_timeout_count++;
-			  }else if(prop_brake_active){
-				  allOff();
-				  actual_all_off_active = 1;
-				  prop_brake_active = 0;
-			  }
-		  }else{
-			  brake_on_stop_timeout_count = 0;
-		  }
-
-		  stop_brake_enabled = brake_on_stop && (brake_on_stop_timeout_count < BRAKE_ON_STOP_TIMEOUT_TICKS);
-
 #ifndef BRUSHED_MODE
 
 	 	 if ((zero_crosses > 1000) || (adjusted_input == 0)){
  	 		bemf_timeout_happened = 0;
+#ifdef USE_LED_STRIP
+	 		if(adjusted_input == 0 && armed){
+	 			send_LED_RGB(0,255,0); // set green for armed 
+	 		}
+#endif
 #ifdef USE_RGB_LED
 	 		if(adjusted_input == 0 && armed){
 			  GPIOB->BSRR = LL_GPIO_PIN_8; // off red
@@ -1867,6 +1824,9 @@ if(newinput > 2000){
 	 		 maskPhaseInterrupts();
 	 		 input = 0;
 	 		bemf_timeout_happened = 102;
+#ifdef USE_LED_STRIP
+			send_LED_RGB(124,124,0); // set orange for rotor stuck
+#endif
 #ifdef USE_RGB_LED
 			  GPIOB->BRR = LL_GPIO_PIN_8; // on red
 			  GPIOB->BSRR = LL_GPIO_PIN_5;  //
@@ -2075,12 +2035,11 @@ if(input > 48 && armed){
 
 }else{
 	do_once_sinemode = 1;
-	if(stop_brake_enabled){
+	if(brake_on_stop){
 #ifndef PWM_ENABLE_BRIDGE
 	duty_cycle = (TIMER1_MAX_ARR-19) + drag_brake_strength*2;
 	adjusted_duty_cycle = TIMER1_MAX_ARR - ((duty_cycle * tim1_arr)/TIMER1_MAX_ARR)+1;
 	proportionalBrake();
-	actual_brake_active = 1;
 	TIM1->CCR1 = adjusted_duty_cycle;
 	TIM1->CCR2 = adjusted_duty_cycle;
 	TIM1->CCR3 = adjusted_duty_cycle;
@@ -2094,7 +2053,6 @@ if(input > 48 && armed){
 	TIM1->CCR2 = 0;
 	TIM1->CCR3 = 0;
 	allOff();
-	actual_all_off_active = 1;
 	}
 }
 
@@ -2135,19 +2093,6 @@ if(input > 48 && armed){
 #endif
   		}
 
-#ifdef USE_LED_STRIP
-		if(adjusted_input == 0 && armed){
-			if(actual_full_brake_active){
-				updateLedStripColor(0,0,255);
-			}else if(actual_brake_active){
-				updateLedStripColor(0,255,255);
-			}else if(actual_all_off_active){
-				updateLedStripColor(255,128,0);
-			}else{
-				updateLedStripColor(0,255,0);
-			}
-		}
-#endif
 }
 
 
