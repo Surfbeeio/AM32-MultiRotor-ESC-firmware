@@ -30,6 +30,25 @@ int getAbsDif(int number1, int number2){
 }
 
 
+uint16_t slew_u16(uint16_t current, uint16_t target, uint16_t step){
+	if (current < target){
+		uint16_t delta = target - current;
+		if (delta > step){
+			return current + step;
+		}
+		return target;
+	}
+	if (current > target){
+		uint16_t delta = current - target;
+		if (delta > step){
+			return current - step;
+		}
+		return target;
+	}
+	return current;
+}
+
+
 void delayMicros(uint32_t micros){
 	UTILITY_TIMER->CNT = 0;
 	while (UTILITY_TIMER->CNT < micros){
