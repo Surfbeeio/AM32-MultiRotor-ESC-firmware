@@ -198,9 +198,15 @@
 #endif
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 98
+#define VERSION_MINOR 99
 
 //firmware build options !! fixed speed and duty cycle modes are not to be used with sinusoidal startup !!
+
+// TEMPORARY DEBUG: overload the consumed-mAh serial-telemetry field with a motor
+// state code (x1000) so motor mode is visible in the ArduPilot log. Disable for
+// normal builds. State codes: 0 disarmed, 1000 armed/stopped, 2000 BEMF running,
+// 3000 sine running, 4000 stuck-rotor cut active.
+#define DEBUG_MOTOR_STATE
 
 //#define FIXED_DUTY_MODE  // bypasses signal input and arming, uses a set duty cycle. For pumps, slot cars etc
 //#define FIXED_DUTY_MODE_POWER 100     // 0-100 percent not used in fixed speed mode
@@ -1329,10 +1335,31 @@ if(send_telemetry){
 //       er_tx = 0xFFFD;         // over-temp
 //   }
 
+  uint16_t consumed_tx = (uint16_t)consumed_current;
+#ifdef DEBUG_MOTOR_STATE
+  // Overload consumed-mAh with a motor-state code (x1000) so mode is visible in
+  // the AP log. AP scales this field linearly, so distinct x1000 levels stay
+  // distinct. Real consumed_current is not reported in a DEBUG_MOTOR_STATE build.
+  uint16_t dbg_state;
+  if(!armed){
+      dbg_state = 0;
+  }else if(!running){
+      dbg_state = 1;          // armed, stopped
+  }else if(stepper_sine){
+      dbg_state = 3;          // running in sine
+  }else{
+      dbg_state = 2;          // running in BEMF / six-step
+  }
+  if(bemf_timeout_happened > bemf_timeout * (1 + (crawler_mode*100)) && stuck_rotor_protection){
+      dbg_state = 4;          // stuck-rotor cut active (highest priority)
+  }
+  consumed_tx = dbg_state * 1000;
+#endif
+
   makeTelemPackage(degrees_celsius,
                    battery_voltage,           // V * 10 (unchanged)
                    (uint16_t)actual_current,  // raw scaling as before
-                   (uint16_t)consumed_current,
+                   consumed_tx,               // debug state code if DEBUG_MOTOR_STATE
                    er_tx);                    // <-- magic value if faulting
   send_telem_DMA();
   send_telemetry = 0;
