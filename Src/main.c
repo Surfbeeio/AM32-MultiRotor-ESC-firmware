@@ -174,13 +174,6 @@
 *1.97 — 2024-06-10
 	### Added
 	- parameter to adjust voltage divider ratio for battery voltage measurement 47
-*1.98 — 2026-05-20
-	### Fixed
-	- Low-speed sine stall on fast deceleration: when throttle drops into the sine
-	  region while the rotor is still spinning faster than sine can hold, the ESC
-	  now stays in BEMF commutation and bleeds speed off (minimum duty, ramped)
-	  until commutation_interval reaches SINE_CAPTURE_INTERVAL, then hands over to
-	  sine. Previously it switched to sine immediately and lost sync.
 
 */
 
@@ -287,14 +280,6 @@ uint16_t stall_protect_target_interval = TARGET_STALL_PROTECTION_INTERVAL;
 char USE_HALL_SENSOR = 0;
 uint16_t enter_sine_angle = 180;
 char do_once_sinemode= 0;
-
-// Defer the sine handover until the rotor has slowed enough for sine to capture
-// it. commutation_interval is in 0.5us units for one 60deg sector; while it is
-// below this value the rotor is spinning faster than low-power sine can hold, so
-// we stay in BEMF commutation and bleed speed off first. Anchored to the value
-// the sine->square exit already assumes ([main.c] commutation_interval = 9000).
-#define SINE_CAPTURE_INTERVAL 9000
-char waiting_for_sine_capture = 0;
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -1145,7 +1130,6 @@ if(!armed && (cell_count == 0)){
 	  if(!RC_CAR_REVERSE){
 		  prop_brake_active = 0;
 	  }
-	  waiting_for_sine_capture = 0;
 	  }
 	  if (input < 47 + (80*use_sin_start)){
 		if(play_tone_flag != 0){
@@ -1217,19 +1201,7 @@ if(!armed && (cell_count == 0)){
 		  	 }
 
 		 	  if(use_sin_start == 1){
-		 	  	  if(running && commutation_interval < SINE_CAPTURE_INTERVAL){
-		 	  	  	  // Rotor still too fast for sine to capture. Stay in BEMF
-		 	  	  	  // commutation and command minimum duty so the rotor bleeds
-		 	  	  	  // speed off (smoothed by the duty ramp below) until it slows
-		 	  	  	  // into the sine range. Do not switch to sine yet.
-		 	  	  	  waiting_for_sine_capture = 1;
-		 	  	  	  duty_cycle = minimum_duty_cycle;
-		 	  	  }else{
-		 	  	  	  // Stopped, or rotor slow enough: hand over to sine. The
-		 	  	  	  // sine-max step rate now matches the rotor speed.
-		 	  	  	  waiting_for_sine_capture = 0;
-		 	  	  	  stepper_sine = 1;
-		 	  	  }
+		    	 stepper_sine = 1;
 		 	  }
 		  }
 		  }
