@@ -296,6 +296,26 @@ char do_once_sinemode= 0;
 #define SINE_SLEW_RATE 2
 uint16_t sine_target_step_delay = 0;
 uint16_t zc_since_handoff = 0;   // debug: commutations counted since last sine->BEMF switch
+
+// Sine amplitude soft-engage: ramp the sine drive amplitude from low up to the
+// configured sine_mode_power over the first steps after dropping into sine, so a
+// spinning rotor isn't kicked out of sync by full field slammed on at a
+// possibly-wrong angle. Only armed on a running->sine entry; from-stop start
+// uses full power (unchanged). sine_power_acc carries amplitude in 1/64 units so
+// the ramp can span tens of steps (mechanically meaningful) despite the coarse
+// 0..10 power scale. Lower SINE_POWER_SLEW = gentler/longer ramp. SINE_POWER_START
+// must be high enough to hold the load or it slips during the ramp itself.
+#define SINE_POWER_START 2       // starting amplitude (sine_mode_power units)
+#define SINE_POWER_SLEW  4       // amplitude ramp speed (1/64 unit per sine step)
+uint16_t sine_power_acc = 0;     // amplitude * 64, ramped up on entry
+uint8_t  sine_power_ramp = 0;    // effective amplitude (acc>>6), used in the CCR write
+
+// In-sine slip probe: once per electrical cycle (field-angle wrap to 0) sample
+// the raw, unsmoothed current. A locked rotor sits at a steady load angle so the
+// reading is consistent cycle-to-cycle; a slipping rotor's position drifts so it
+// wanders. sine_slip_metric = |delta| of consecutive per-cycle samples (debug).
+uint16_t sine_probe_last_current = 0;
+uint16_t sine_slip_metric = 0;
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -1248,6 +1268,15 @@ if(!armed && (cell_count == 0)){
 		 	  	  	  uint16_t seed = commutation_interval / 120;
 		 	  	  	  if(seed < 1){ seed = 1; }
 		 	  	  	  step_delay = seed;
+		 	  	  	  // Soft-engage the field: start amplitude low and ramp it up in
+		 	  	  	  // the sine crawl, so a spinning rotor isn't kicked out of sync.
+		 	  	  	  sine_power_acc = (uint16_t)SINE_POWER_START << 6;
+		 	  	  	  sine_power_ramp = sine_power_acc >> 6;   // valid before first CCR write
+		 	  	  	  sine_probe_last_current = ADC_raw_current;  // prime slip probe baseline
+		 	  	  }else if(!running && stepper_sine == 0){
+		 	  	  	  // From-stop start: full amplitude immediately (unchanged behavior).
+		 	  	  	  sine_power_acc = (uint16_t)sine_mode_power << 6;
+		 	  	  	  sine_power_ramp = sine_power_acc >> 6;
 		 	  	  }
 		    	 stepper_sine = 1;
 		 	  }
@@ -1402,6 +1431,12 @@ if(send_telemetry){
       uint16_t n = zc_since_handoff;
       if(n > 500){ n = 500; }
       consumed_tx = 4000 + n;
+  }else if(dbg_state == 3){
+      // In sine: encode 3000 + per-cycle current slip metric (capped 999). Near
+      // 3000 => rotor locked to the field; climbing toward 3999 => slipping.
+      uint16_t s = sine_slip_metric;
+      if(s > 999){ s = 999; }
+      consumed_tx = 3000 + s;
   }else{
       consumed_tx = dbg_state * 1000;
   }
@@ -1500,9 +1535,9 @@ if (!forward){
     TIM1->CCR2 = ((2*pwmSin[phase_B_position])+gate_drive_offset)*TIMER1_MAX_ARR/2000;
     TIM1->CCR3 = ((2*pwmSin[phase_C_position])+gate_drive_offset)*TIMER1_MAX_ARR/2000;
 #else
-    TIM1->CCR1 = (((2*pwmSin[phase_A_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*sine_mode_power / 10;
-    TIM1->CCR2 = (((2*pwmSin[phase_B_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*sine_mode_power / 10;
-    TIM1->CCR3 = (((2*pwmSin[phase_C_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*sine_mode_power / 10;
+    TIM1->CCR1 = (((2*pwmSin[phase_A_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*sine_power_ramp / 10;
+    TIM1->CCR2 = (((2*pwmSin[phase_B_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*sine_power_ramp / 10;
+    TIM1->CCR3 = (((2*pwmSin[phase_C_position]/SINE_DIVIDER)+gate_drive_offset)*TIMER1_MAX_ARR/2000)*sine_power_ramp / 10;
 #endif
 }
 
@@ -2128,6 +2163,25 @@ if(input > 48 && armed){
              // Slew the open-loop field speed toward the throttle target instead of
              // snapping to it, so the loaded rotor can follow without slipping.
              step_delay = slew_u16(step_delay, sine_target_step_delay, SINE_SLEW_RATE);
+             // Soft-engage: ramp sine amplitude up to the configured power so the
+             // field grabs the rotor gently instead of kicking it out of sync.
+             {
+                 uint16_t pwr_target = (uint16_t)sine_mode_power << 6;
+                 if(sine_power_acc < pwr_target){
+                     sine_power_acc += SINE_POWER_SLEW;
+                     if(sine_power_acc > pwr_target){ sine_power_acc = pwr_target; }
+                 }
+                 sine_power_ramp = sine_power_acc >> 6;
+             }
+             // In-sine slip probe: once per electrical cycle (field angle wrapped
+             // to 0), sample raw current. Locked rotor => steady cycle-to-cycle;
+             // slipping rotor => wanders. advanceincrement() above just updated
+             // phase_A_position, so this catches the wrap of this step.
+             if(phase_A_position == 0){
+                 uint16_t now_c = ADC_raw_current;
+                 sine_slip_metric = getAbsDif(now_c, sine_probe_last_current);
+                 sine_probe_last_current = now_c;
+             }
 	 		 delayMicros(step_delay);
 			 e_rpm =   600/ step_delay ;         // in hundreds so 33 e_rpm is 3300 actual erpm
 
