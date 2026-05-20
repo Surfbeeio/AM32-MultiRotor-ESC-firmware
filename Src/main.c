@@ -306,7 +306,7 @@ uint16_t zc_since_handoff = 0;   // debug: commutations counted since last sine-
 // 0..10 power scale. Lower SINE_POWER_SLEW = gentler/longer ramp. SINE_POWER_START
 // must be high enough to hold the load or it slips during the ramp itself.
 #define SINE_POWER_START 2       // starting amplitude (sine_mode_power units)
-#define SINE_POWER_SLEW  4       // amplitude ramp speed (1/64 unit per sine step)
+#define SINE_POWER_SLEW  2       // amplitude ramp speed (1/64 unit per sine step)
 uint16_t sine_power_acc = 0;     // amplitude * 64, ramped up on entry
 uint8_t  sine_power_ramp = 0;    // effective amplitude (acc>>6), used in the CCR write
 
