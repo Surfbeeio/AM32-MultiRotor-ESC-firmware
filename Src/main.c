@@ -286,6 +286,16 @@ uint16_t stall_protect_target_interval = TARGET_STALL_PROTECTION_INTERVAL;
 char USE_HALL_SENSOR = 0;
 uint16_t enter_sine_angle = 180;
 char do_once_sinemode= 0;
+
+// Sine field-speed slew: open-loop sine takes its step rate straight from
+// throttle, so a fast throttle move makes the commanded field jump faster than
+// the loaded rotor can follow -> it slips and stalls. Limit how fast step_delay
+// (us per electrical degree) may change per sine step so the rotor can always
+// keep up. Larger = snappier but more likely to slip; tune up until just before
+// slip returns.
+#define SINE_SLEW_RATE 2
+uint16_t sine_target_step_delay = 0;
+uint16_t zc_since_handoff = 0;   // debug: commutations counted since last sine->BEMF switch
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -961,6 +971,9 @@ void PeriodElapsedCallback(){
 			if(zero_crosses<10000){
 			zero_crosses++;
 			}
+			if(zc_since_handoff < 500){     // debug: count good commutations after switchover
+			zc_since_handoff++;
+			}
 
 }
 
@@ -1207,6 +1220,15 @@ if(!armed && (cell_count == 0)){
 		  	 }
 
 		 	  if(use_sin_start == 1){
+		 	  	  if(running && stepper_sine == 0){
+		 	  	  	  // Entering sine from a spinning rotor: seed the field speed to
+		 	  	  	  // match the current rotor speed so the first sine step doesn't
+		 	  	  	  // jump. commutation_interval is 0.5us units per 60deg sector,
+		 	  	  	  // so us per electrical degree = /120.
+		 	  	  	  uint16_t seed = commutation_interval / 120;
+		 	  	  	  if(seed < 1){ seed = 1; }
+		 	  	  	  step_delay = seed;
+		 	  	  }
 		    	 stepper_sine = 1;
 		 	  }
 		  }
@@ -1353,7 +1375,16 @@ if(send_telemetry){
   if(bemf_timeout_happened > bemf_timeout * (1 + (crawler_mode*100)) && stuck_rotor_protection){
       dbg_state = 4;          // stuck-rotor cut active (highest priority)
   }
-  consumed_tx = dbg_state * 1000;
+  if(dbg_state == 4){
+      // Fault: encode 4000 + commutations achieved since the last sine->BEMF
+      // switchover (capped 500). ~4000 => rotor was already dead at handoff
+      // (stalled in sine); higher => BEMF ran then lost it during re-acquisition.
+      uint16_t n = zc_since_handoff;
+      if(n > 500){ n = 500; }
+      consumed_tx = 4000 + n;
+  }else{
+      consumed_tx = dbg_state * 1000;
+  }
 #endif
 
   makeTelemPackage(degrees_celsius,
@@ -2073,7 +2104,10 @@ if(input > 48 && armed){
 	   	 		do_once_sinemode = 0;
 	   	 	}
 	 		 advanceincrement();
-             step_delay = map (input, 48, 120, 7000/motor_poles, 810/motor_poles);
+             sine_target_step_delay = map (input, 48, 120, 7000/motor_poles, 810/motor_poles);
+             // Slew the open-loop field speed toward the throttle target instead of
+             // snapping to it, so the loaded rotor can follow without slipping.
+             step_delay = slew_u16(step_delay, sine_target_step_delay, SINE_SLEW_RATE);
 	 		 delayMicros(step_delay);
 			 e_rpm =   600/ step_delay ;         // in hundreds so 33 e_rpm is 3300 actual erpm
 
@@ -2095,6 +2129,7 @@ if(input > 48 && armed){
 				  last_average_interval = average_interval;
 		 		  INTERVAL_TIMER->CNT = 9000;
 				  zero_crosses = 10;
+				  zc_since_handoff = 0;   // debug: start counting commutations after this switchover
 				  prop_brake_active = 0;
 	 			  step = changeover_step;                    // rising bemf on a same as position 0.
 		 		// comStep(step);// rising bemf on a same as position 0.
