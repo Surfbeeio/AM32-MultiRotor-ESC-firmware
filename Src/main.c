@@ -1206,9 +1206,29 @@ if(!armed && (cell_count == 0)){
 			  	  }
 		  }
 
+		  	  // Seed the sine field at the rotor's PRECISE electrical angle so it
+		  	  // locks onto the rotor instead of slipping. step gives the 60deg
+		  	  // sector; INTERVAL_TIMER->CNT / commutation_interval gives how far
+		  	  // through that sector the rotor actually is. Without this fraction the
+		  	  // field can start up to 60deg off -> rotor just vibrates and never
+		  	  // locks in (the BEMF->sine entry stall). Only valid when running (a
+		  	  // spinning rotor with live commutation timing); from-stop start keeps
+		  	  // the plain seed. Direction matches advanceincrement (sine phase
+		  	  // decrements when forward, increments otherwise).
 		  	  phase_A_position = ((step-1) * 60) + enter_sine_angle;
-		  	  if(phase_A_position > 359){
+		  	  if(running){
+		  	  	  uint16_t intra = INTERVAL_TIMER->CNT;
+		  	  	  if(intra > commutation_interval){ intra = commutation_interval; }
+		  	  	  int16_t frac_deg = (commutation_interval > 0)
+		  	  	  	  ? (int16_t)((uint32_t)intra * 60 / commutation_interval) : 0;
+		  	  	  if(forward){ phase_A_position -= frac_deg; }
+		  	  	  else       { phase_A_position += frac_deg; }
+		  	  }
+		  	  while(phase_A_position > 359){
 		  		  phase_A_position -= 360;
+		  	  }
+		  	  while(phase_A_position < 0){
+		  		  phase_A_position += 360;
 		  	  }
 		  	  phase_B_position = phase_A_position +  119;
 		  	  if(phase_B_position > 359){
