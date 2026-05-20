@@ -310,12 +310,16 @@ uint16_t zc_since_handoff = 0;   // debug: commutations counted since last sine-
 uint16_t sine_power_acc = 0;     // amplitude * 64, ramped up on entry
 uint8_t  sine_power_ramp = 0;    // effective amplitude (acc>>6), used in the CCR write
 
-// In-sine slip probe: once per electrical cycle (field-angle wrap to 0) sample
-// the raw, unsmoothed current. A locked rotor sits at a steady load angle so the
-// reading is consistent cycle-to-cycle; a slipping rotor's position drifts so it
-// wanders. sine_slip_metric = |delta| of consecutive per-cycle samples (debug).
-uint16_t sine_probe_last_current = 0;
-uint16_t sine_slip_metric = 0;
+// In-sine stall probe (READ-ONLY: pure ADC reads, no FET/drive changes, so it
+// cannot overcurrent or shoot-through). Track the raw current swing across each
+// electrical cycle. A locked rotor holds a ~constant load angle so bus current is
+// steady (LOW swing); a stalled rotor has the field sweeping past a stationary
+// rotor, so torque/bus current pulse through the cycle (HIGH swing). A swing that
+// climbs while still in sine = the rotor stalling in the crawl. Uses raw 12-bit
+// ADC_raw_current (finer than the smoothed telemetry value).
+uint16_t sine_cur_min = 0xFFFF;  // intra-cycle raw-current minimum
+uint16_t sine_cur_max = 0;       // intra-cycle raw-current maximum
+uint16_t sine_swing_metric = 0;  // last completed cycle's peak-to-peak (debug)
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -1272,7 +1276,7 @@ if(!armed && (cell_count == 0)){
 		 	  	  	  // the sine crawl, so a spinning rotor isn't kicked out of sync.
 		 	  	  	  sine_power_acc = (uint16_t)SINE_POWER_START << 6;
 		 	  	  	  sine_power_ramp = sine_power_acc >> 6;   // valid before first CCR write
-		 	  	  	  sine_probe_last_current = ADC_raw_current;  // prime slip probe baseline
+		 	  	  	  sine_cur_min = 0xFFFF; sine_cur_max = 0;   // reset stall-probe window
 		 	  	  }else if(!running && stepper_sine == 0){
 		 	  	  	  // From-stop start: full amplitude immediately (unchanged behavior).
 		 	  	  	  sine_power_acc = (uint16_t)sine_mode_power << 6;
@@ -1432,9 +1436,11 @@ if(send_telemetry){
       if(n > 500){ n = 500; }
       consumed_tx = 4000 + n;
   }else if(dbg_state == 3){
-      // In sine: encode 3000 + per-cycle current slip metric (capped 999). Near
-      // 3000 => rotor locked to the field; climbing toward 3999 => slipping.
-      uint16_t s = sine_slip_metric;
+      // In sine: encode 3000 + per-cycle raw-current swing (capped 999). Near 3000
+      // => rotor locked (steady current); climbing toward 3999 => stalling (field
+      // sweeping past a stuck rotor pulses the current). Watch for it to climb
+      // while still in the 3000 band, before any 4000 cut.
+      uint16_t s = sine_swing_metric;
       if(s > 999){ s = 999; }
       consumed_tx = 3000 + s;
   }else{
@@ -2173,14 +2179,20 @@ if(input > 48 && armed){
                  }
                  sine_power_ramp = sine_power_acc >> 6;
              }
-             // In-sine slip probe: once per electrical cycle (field angle wrapped
-             // to 0), sample raw current. Locked rotor => steady cycle-to-cycle;
-             // slipping rotor => wanders. advanceincrement() above just updated
-             // phase_A_position, so this catches the wrap of this step.
-             if(phase_A_position == 0){
-                 uint16_t now_c = ADC_raw_current;
-                 sine_slip_metric = getAbsDif(now_c, sine_probe_last_current);
-                 sine_probe_last_current = now_c;
+             // In-sine stall probe (read-only): track the raw current swing over
+             // each electrical cycle. Locked rotor => steady bus current => low
+             // swing; stalled rotor => field sweeps past a stuck rotor => current
+             // pulses => high swing. advanceincrement() above just updated
+             // phase_A_position, so the ==0 test catches the cycle wrap.
+             {
+                 uint16_t c = ADC_raw_current;
+                 if(c < sine_cur_min){ sine_cur_min = c; }
+                 if(c > sine_cur_max){ sine_cur_max = c; }
+                 if(phase_A_position == 0){
+                     sine_swing_metric = sine_cur_max - sine_cur_min;
+                     sine_cur_min = 0xFFFF;
+                     sine_cur_max = 0;
+                 }
              }
 	 		 delayMicros(step_delay);
 			 e_rpm =   600/ step_delay ;         // in hundreds so 33 e_rpm is 3300 actual erpm
