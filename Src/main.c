@@ -174,12 +174,6 @@
 *1.97 — 2024-06-10
 	### Added
 	- parameter to adjust voltage divider ratio for battery voltage measurement 47
-*1.98 — 2026-05-20
-	### Fixed
-	- Synchronized sine handoff: when throttle drops into the sine region while the
-	  rotor is still spinning, the sine step rate is now seeded from the measured
-	  commutation interval and slewed toward the throttle-derived rate, instead of
-	  snapping to it. Prevents low-speed stall/desync on fast deceleration into sine.
 
 */
 
@@ -286,17 +280,6 @@ uint16_t stall_protect_target_interval = TARGET_STALL_PROTECTION_INTERVAL;
 char USE_HALL_SENSOR = 0;
 uint16_t enter_sine_angle = 180;
 char do_once_sinemode= 0;
-
-// Synchronized sine handoff: when entering sine mode from a spinning rotor,
-// seed the sine step rate from measured rotor speed and slew toward the
-// throttle-derived rate instead of snapping to it (avoids low-speed stall).
-#define SINE_HANDOFF_SLEW_US      2    // step_delay change per sine step (us)
-#define SINE_HANDOFF_DONE_BAND_US 3    // handoff done within this of target (us)
-#define SINE_HANDOFF_MAX_STEPS    300  // safety cap on handoff duration
-char sine_handoff_active = 0;
-uint16_t sine_handoff_count = 0;
-uint16_t sine_target_step_delay = 0;
-uint16_t sine_entry_commutation_interval = 0;   // debug: rotor speed at handoff
 //============================= Servo Settings ==============================
 uint16_t servo_low_threshold = 1100;	// anything below this point considered 0
 uint16_t servo_high_threshold = 1900;	// anything above this point considered 2000 (max)
@@ -1218,23 +1201,6 @@ if(!armed && (cell_count == 0)){
 		  	 }
 
 		 	  if(use_sin_start == 1){
-		 	  	  if(running && stepper_sine == 0){
-		 	  	  	  // Entering sine mode from a spinning rotor. Seed the sine step
-		 	  	  	  // rate to match current rotor speed. commutation_interval is in
-		 	  	  	  // 0.5us units for one 60deg sector, so us per 1deg step = /120.
-		 	  	  	  uint16_t seed = commutation_interval / 120;
-		 	  	  	  uint16_t min_delay = 810 / motor_poles;
-		 	  	  	  uint16_t max_delay = 7000 / motor_poles;
-		 	  	  	  if(seed < min_delay){ seed = min_delay; }
-		 	  	  	  if(seed > max_delay){ seed = max_delay; }
-		 	  	  	  step_delay = seed;
-		 	  	  	  sine_entry_commutation_interval = commutation_interval;
-		 	  	  	  sine_handoff_active = 1;
-		 	  	  	  sine_handoff_count = 0;
-		 	  	  }else if(!running){
-		 	  	  	  sine_handoff_active = 0;
-		 	  	  	  sine_handoff_count = 0;
-		 	  	  }
 		    	 stepper_sine = 1;
 		 	  }
 		  }
@@ -2080,20 +2046,7 @@ if(input > 48 && armed){
 	   	 		do_once_sinemode = 0;
 	   	 	}
 	 		 advanceincrement();
-             sine_target_step_delay = map (input, 48, 120, 7000/motor_poles, 810/motor_poles);
-             if(sine_handoff_active){
-                 // Slew the sine step rate from the rotor-matched seed toward the
-                 // throttle-derived target so the field stays in sync with the
-                 // decelerating rotor instead of snapping and losing torque.
-                 step_delay = slew_u16(step_delay, sine_target_step_delay, SINE_HANDOFF_SLEW_US);
-                 sine_handoff_count++;
-                 if(getAbsDif(step_delay, sine_target_step_delay) < SINE_HANDOFF_DONE_BAND_US
-                    || sine_handoff_count > SINE_HANDOFF_MAX_STEPS){
-                     sine_handoff_active = 0;
-                 }
-             }else{
-                 step_delay = sine_target_step_delay;
-             }
+             step_delay = map (input, 48, 120, 7000/motor_poles, 810/motor_poles);
 	 		 delayMicros(step_delay);
 			 e_rpm =   600/ step_delay ;         // in hundreds so 33 e_rpm is 3300 actual erpm
 
