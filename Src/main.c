@@ -454,6 +454,12 @@ int total = 0;
 uint16_t readings[30];
 
 uint8_t bemf_timeout_happened = 0;
+// 500ms one-shot stuck-rotor restart: on a stuck-rotor cut, wait 500ms then make
+// ONE restart attempt at the current command. If it stalls again, latch off until
+// the throttle returns to neutral (which re-arms the one-shot).
+char stuck_retry_used = 0;          // one-shot consumed since last neutral
+char stuck_waiting = 0;             // in the 500ms cool-off before the retry
+uint16_t stuck_retry_timer = 0;     // 10kHz ticks while waiting (5000 = 500ms)
 uint8_t changeover_step = 5;
 uint8_t filter_level = 5;
 uint8_t running = 0;
@@ -1025,6 +1031,7 @@ void tenKhzRoutine(){
 
 
 	tenkhzcounter++;
+	if(stuck_waiting && stuck_retry_timer < 60000){ stuck_retry_timer++; } // 500ms stuck-retry wait
 	if(tenkhzcounter > 10000){      // 1s sample interval 10000
 		consumed_current = (float)actual_current/360 + consumed_current;
 					switch (dshot_extended_telemetry){
@@ -1870,6 +1877,11 @@ if(newinput > 2000){
 	 	 if(use_sin_start && adjusted_input < 160){
 	 		bemf_timeout_happened = 0;
 	 	 }
+	 	 if(adjusted_input == 0){          // back to neutral -> re-arm the 500ms one-shot retry
+	 		stuck_retry_used = 0;
+	 		stuck_waiting = 0;
+	 		stuck_retry_timer = 0;
+	 	 }
 
  	 	 if(crawler_mode){
  	 		if (adjusted_input < 400){
@@ -1886,7 +1898,19 @@ if(newinput > 2000){
 	 		 allOff();
 	 		 maskPhaseInterrupts();
 	 		 input = 0;
-	 		bemf_timeout_happened = 102;
+	 		// 500ms one-shot restart before latching off:
+	 		if(stuck_retry_used){
+	 			bemf_timeout_happened = 102;        // retry already spent -> stay stuck till neutral
+	 		}else if(!stuck_waiting){
+	 			stuck_waiting = 1; stuck_retry_timer = 0;
+	 			bemf_timeout_happened = 102;        // hold off during the 500ms cool-off
+	 		}else if(stuck_retry_timer >= 5000){    // 500ms elapsed -> one restart at the command
+	 			stuck_waiting = 0; stuck_retry_used = 1;
+	 			running = 0;                        // force a clean restart
+	 			bemf_timeout_happened = 0;          // release the cut so the motor tries again
+	 		}else{
+	 			bemf_timeout_happened = 102;        // still waiting out the 500ms
+	 		}
 #ifdef USE_RGB_LED
 			  GPIOB->BRR = LL_GPIO_PIN_8; // on red
 			  GPIOB->BSRR = LL_GPIO_PIN_5;  //
