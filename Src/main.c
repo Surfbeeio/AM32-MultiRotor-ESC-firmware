@@ -400,6 +400,11 @@ typedef enum
 
 uint16_t startup_max_duty_cycle = 300 + DEAD_TIME;
 uint16_t minimum_duty_cycle = DEAD_TIME;
+// 6-step running-duty floor (use_sin_start path only). Lower than minimum_duty_cycle
+// to push the 6-step minimum speed down toward the sine ceiling so the changeover
+// gap closes. ~90 counts (~4.5% of 1999) targets ~285 mech / ~2000 eRPM under the
+// current prop load. Raise if it desyncs at the low end; the stuck-retry catches it.
+uint16_t sixstep_min_duty = 90;
 uint16_t stall_protect_minimum_duty = DEAD_TIME;
 char desync_check = 0;
 char low_kv_filter_level = 20;
@@ -1116,7 +1121,7 @@ if(!armed && (cell_count == 0)){
 
 		  }
 	  if(use_sin_start){
-		duty_cycle = map(input, 137, 2047, minimum_duty_cycle, TIMER1_MAX_ARR);
+		duty_cycle = map(input, 137, 2047, sixstep_min_duty, TIMER1_MAX_ARR);  // lower 6-step floor -> ~2000 eRPM
   	  }else{
 	 	 duty_cycle = map(input, 47, 2047, minimum_duty_cycle, TIMER1_MAX_ARR);
 	  }
