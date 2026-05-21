@@ -1349,6 +1349,9 @@ if(send_telemetry){
    } //else if (fault_overtemp) {
 //       er_tx = 0xFFFD;         // over-temp
 //   }
+  if (adjusted_input == 0) {  // commanded neutral -> report 0, not the last running value
+      er_tx = 0;
+   }
 
   makeTelemPackage(degrees_celsius,
                    battery_voltage,           // V * 10 (unchanged)
