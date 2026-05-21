@@ -198,7 +198,7 @@
 #endif
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 97
+#define VERSION_MINOR 98
 
 //firmware build options !! fixed speed and duty cycle modes are not to be used with sinusoidal startup !!
 
@@ -276,6 +276,12 @@ char drag_brake_strength = 10;		// Drag Brake Power when brake on stop is enable
 uint8_t driving_brake_strength = 10;
 uint8_t dead_time_override = DEAD_TIME;
 char sine_mode_changeover_thottle_level = 5;	// Sine Startup Range
+// DOWN-TRIP: on the way down, keep 6-step running until the motor has slowed to
+// ~this commutation_interval before dropping back to sine. ~11400 is ~250 rpm
+// (commutation_interval scales as 1/rpm off the ~6667 seen at the ~428 rpm 6-step
+// floor). Chosen to sit just under the raised ~280 rpm sine ceiling so sine can
+// hold the handoff. Raise -> sine takes over slower; lower -> 6-step held faster.
+uint16_t sine_reentry_interval = 11400;
 uint16_t stall_protect_target_interval = TARGET_STALL_PROTECTION_INTERVAL;
 char USE_HALL_SENSOR = 0;
 uint16_t enter_sine_angle = 180;
@@ -1200,7 +1206,12 @@ if(!armed && (cell_count == 0)){
 		  	 phase_C_position -= 360;
 		  	 }
 
-		 	  if(use_sin_start == 1){
+		 	  // DOWN-TRIP: only drop back to sine once the motor has actually
+		 	  // slowed (commutation_interval > sine_reentry_interval, ~250 rpm),
+		 	  // or if it's stopped. While still spinning faster than that, stay in
+		 	  // 6-step (duty is already at minimum here) and let it coast down, so
+		 	  // 6-step holds down instead of dumping to the sine ceiling.
+		 	  if(use_sin_start == 1 && (!running || commutation_interval > sine_reentry_interval)){
 		    	 stepper_sine = 1;
 		 	  }
 		  }
@@ -2046,7 +2057,10 @@ if(input > 48 && armed){
 	   	 		do_once_sinemode = 0;
 	   	 	}
 	 		 advanceincrement();
-             step_delay = map (input, 48, 120, 7000/motor_poles, 810/motor_poles);
+             // UP-TRIP: raise the sine speed ceiling so sine drives the field up
+             // to ~280 rpm before handing to 6-step (810->480 lowers the minimum
+             // step_delay from ~50us to ~30us for 16-pole). Shrinks the up jump.
+             step_delay = map (input, 48, 120, 7000/motor_poles, 480/motor_poles);
 	 		 delayMicros(step_delay);
 			 e_rpm =   600/ step_delay ;         // in hundreds so 33 e_rpm is 3300 actual erpm
 
