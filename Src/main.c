@@ -407,10 +407,6 @@ uint16_t minimum_duty_cycle = DEAD_TIME;
 // the floor. ~100 counts targets ~360 mech (just above the ~342 desync edge seen
 // at 90). Raise if it still bounces/desyncs; the stuck-retry catches it.
 uint16_t sixstep_min_duty = 100;
-// DOWN-TRIP plateau threshold: hand 6-step -> sine once commutation_interval exceeds
-// this (motor slowed to ~the floor). ~7000 ~= 407 mech (just above the ~360 floor) so
-// it rides 6-step down to the floor then hands to sine at its ceiling. Tune on hw.
-uint16_t sine_reentry_interval = 7000;
 uint16_t stall_protect_minimum_duty = DEAD_TIME;
 char desync_check = 0;
 char low_kv_filter_level = 20;
@@ -1226,11 +1222,10 @@ if(!armed && (cell_count == 0)){
 		  	 phase_C_position -= 360;
 		  	 }
 
-		 	  // DOWN-TRIP plateau: ride 6-step down to its floor before handing back to
-		 	  // sine, so a fast down-sweep doesn't dump to sine while still spinning fast.
-		 	  // Hand off once slowed past sine_reentry_interval (~the floor); sine ceiling
-		 	  // and 6-step floor now both ~360, and sine is at its top here -> seamless.
-		 	  if(use_sin_start == 1 && (!running || commutation_interval > sine_reentry_interval)){
+		 	  // DOWN-TRIP: hard changeover at the throttle threshold (input<127). With the
+		 	  // sine map saturating at 127, sine is at/near its ceiling here, so 6-step hands
+		 	  // back to sine's highest point (lands high), then sine slows with throttle.
+		 	  if(use_sin_start == 1){
 		    	 stepper_sine = 1;
 		 	  }
 		  }
