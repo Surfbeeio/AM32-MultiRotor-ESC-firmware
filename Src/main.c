@@ -276,12 +276,6 @@ char drag_brake_strength = 10;		// Drag Brake Power when brake on stop is enable
 uint8_t driving_brake_strength = 10;
 uint8_t dead_time_override = DEAD_TIME;
 char sine_mode_changeover_thottle_level = 5;	// Sine Startup Range
-// DOWN-TRIP: on the way down, keep 6-step running until the motor has slowed to
-// ~this commutation_interval before dropping back to sine. ~11400 is ~250 rpm
-// (commutation_interval scales as 1/rpm off the ~6667 seen at the ~428 rpm 6-step
-// floor). Chosen to sit just under the raised ~280 rpm sine ceiling so sine can
-// hold the handoff. Raise -> sine takes over slower; lower -> 6-step held faster.
-uint16_t sine_reentry_interval = 11400;
 uint16_t stall_protect_target_interval = TARGET_STALL_PROTECTION_INTERVAL;
 char USE_HALL_SENSOR = 0;
 uint16_t enter_sine_angle = 180;
@@ -1213,12 +1207,11 @@ if(!armed && (cell_count == 0)){
 		  	 phase_C_position -= 360;
 		  	 }
 
-		 	  // DOWN-TRIP: only drop back to sine once the motor has actually
-		 	  // slowed (commutation_interval > sine_reentry_interval, ~250 rpm),
-		 	  // or if it's stopped. While still spinning faster than that, stay in
-		 	  // 6-step (duty is already at minimum here) and let it coast down, so
-		 	  // 6-step holds down instead of dumping to the sine ceiling.
-		 	  if(use_sin_start == 1 && (!running || commutation_interval > sine_reentry_interval)){
+		 	  // DOWN-TRIP: hard changeover - hand straight back to sine at the
+		 	  // throttle threshold (this block is gated by input<127). 6-step is NOT
+		 	  // held down at its floor; sine takes over and slows the motor with
+		 	  // throttle. Sine ceiling is now ~280 so the down jump is ~428->~285.
+		 	  if(use_sin_start == 1){
 		    	 stepper_sine = 1;
 		 	  }
 		  }
