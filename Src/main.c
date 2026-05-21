@@ -456,8 +456,11 @@ char stuck_waiting = 0;             // in the 500ms cool-off before the retry
 uint16_t stuck_retry_timer = 0;     // 10kHz ticks while waiting (5000 = 500ms)
 // After the retry releases, ramp the throttle command up from a low start so the
 // restart crawls through sine then 6-step instead of jumping to full command
-// (which a stuck/stopped rotor can't catch). Lower STUCK_RAMP_DIV = faster ramp.
-#define STUCK_RAMP_DIV 8            // adjusted_input +1 every 8 ticks (~0.8ms/step)
+// (which a stuck/stopped rotor can't catch). Two-phase: dwell slow in the low sine
+// crawl (let the rotor re-sync), then ramp up faster once past it. Higher DIV = slower.
+#define STUCK_RAMP_LOWSINE 150      // adjusted_input below this = low-sine crawl region
+#define STUCK_RAMP_DIV_SINE 24     // slow ramp in the low sine (+1 every 24 ticks ~2.4ms)
+#define STUCK_RAMP_DIV_RUN  8      // faster ramp once climbing past the crawl
 char stuck_ramping = 0;             // soft-ramping the command after a retry
 uint16_t stuck_ramp_adj = 0;        // current cap on adjusted_input during the ramp
 uint8_t stuck_ramp_sub = 0;         // sub-tick divider for the ramp rate
@@ -1033,7 +1036,7 @@ void tenKhzRoutine(){
 
 	tenkhzcounter++;
 	if(stuck_waiting && stuck_retry_timer < 60000){ stuck_retry_timer++; } // 500ms stuck-retry wait
-	if(stuck_ramping){ if(++stuck_ramp_sub >= STUCK_RAMP_DIV){ stuck_ramp_sub = 0; if(stuck_ramp_adj < 2047){ stuck_ramp_adj++; } } } // soft-ramp restart
+	if(stuck_ramping){ uint8_t rdiv = (stuck_ramp_adj < STUCK_RAMP_LOWSINE) ? STUCK_RAMP_DIV_SINE : STUCK_RAMP_DIV_RUN; if(++stuck_ramp_sub >= rdiv){ stuck_ramp_sub = 0; if(stuck_ramp_adj < 2047){ stuck_ramp_adj++; } } } // soft-ramp restart (slow in low sine, faster after)
 	if(tenkhzcounter > 10000){      // 1s sample interval 10000
 		consumed_current = (float)actual_current/360 + consumed_current;
 					switch (dshot_extended_telemetry){
