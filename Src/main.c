@@ -407,6 +407,10 @@ uint16_t minimum_duty_cycle = DEAD_TIME;
 // the floor. ~100 counts targets ~360 mech (just above the ~342 desync edge seen
 // at 90). Raise if it still bounces/desyncs; the stuck-retry catches it.
 uint16_t sixstep_min_duty = 100;
+// DOWN-TRIP plateau threshold: hand 6-step -> sine once commutation_interval exceeds
+// this (motor slowed to ~the floor). ~7000 ~= 407 mech (just above the ~360 floor) so
+// it rides 6-step down to the floor then hands to sine at its ceiling. Tune on hw.
+uint16_t sine_reentry_interval = 7000;
 uint16_t stall_protect_minimum_duty = DEAD_TIME;
 char desync_check = 0;
 char low_kv_filter_level = 20;
@@ -1222,11 +1226,11 @@ if(!armed && (cell_count == 0)){
 		  	 phase_C_position -= 360;
 		  	 }
 
-		 	  // DOWN-TRIP: hard changeover - hand straight back to sine at the
-		 	  // throttle threshold (this block is gated by input<127). 6-step is NOT
-		 	  // held down at its floor; sine takes over and slows the motor with
-		 	  // throttle. Sine ceiling is now ~280 so the down jump is ~428->~285.
-		 	  if(use_sin_start == 1){
+		 	  // DOWN-TRIP plateau: ride 6-step down to its floor before handing back to
+		 	  // sine, so a fast down-sweep doesn't dump to sine while still spinning fast.
+		 	  // Hand off once slowed past sine_reentry_interval (~the floor); sine ceiling
+		 	  // and 6-step floor now both ~360, and sine is at its top here -> seamless.
+		 	  if(use_sin_start == 1 && (!running || commutation_interval > sine_reentry_interval)){
 		    	 stepper_sine = 1;
 		 	  }
 		  }
@@ -2104,9 +2108,11 @@ if(input > 48 && armed){
              // UP-TRIP: (1) raise the sine ceiling - 810->480 lowers the minimum
              // step_delay ~50us->~30us (16-pole) so sine tops out ~280 rpm instead
              // of ~171; (2) extend the saturation point 120->137 so sine keeps
-             // climbing right up to the changeover (input=137) instead of going
-             // flat from 120-137 -> removes the sine plateau, not just raises it.
-             step_delay = map (input, 48, 137, 7000/motor_poles, 480/motor_poles);
+             // (1) ceiling 480->380 -> ~360 mech to meet the 6-step floor; (2) saturate
+             // at input=127 (not 137) so sine is already at its ceiling at the down-trip
+             // re-entry point (input<127) -> 6-step hands back to sine at sine's TOP, not a
+             // lower point. 127-137 is a small sine plateau at the ceiling before changeover.
+             step_delay = map (input, 48, 127, 7000/motor_poles, 380/motor_poles);
 	 		 delayMicros(step_delay);
 			 e_rpm =   600/ step_delay ;         // in hundreds so 33 e_rpm is 3300 actual erpm
 
