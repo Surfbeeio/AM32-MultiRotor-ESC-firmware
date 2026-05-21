@@ -379,7 +379,9 @@ int16_t actual_current = 0;
 char lowkv = 0;
 
 uint16_t min_startup_duty = 120;
-uint16_t sin_mode_min_s_d = 120;
+uint16_t sin_mode_min_s_d = 100;  // sine-start min_startup_duty (recovery clamp). Matched to
+                                  // sixstep_min_duty (~360 mech) so a low-speed desync recovers
+                                  // at the floor instead of bouncing up to ~420.
 char bemf_timeout = 10;
 
 char startup_boost = 50;
@@ -400,11 +402,11 @@ typedef enum
 
 uint16_t startup_max_duty_cycle = 300 + DEAD_TIME;
 uint16_t minimum_duty_cycle = DEAD_TIME;
-// 6-step running-duty floor (use_sin_start path only). Lower than minimum_duty_cycle
-// to push the 6-step minimum speed down toward the sine ceiling so the changeover
-// gap closes. ~90 counts (~4.5% of 1999) targets ~285 mech / ~2000 eRPM under the
-// current prop load. Raise if it desyncs at the low end; the stuck-retry catches it.
-uint16_t sixstep_min_duty = 90;
+// 6-step running-duty floor (use_sin_start path only). Set with sin_mode_min_s_d
+// to the SAME value so the desync-recovery clamp doesn't bounce the motor above
+// the floor. ~100 counts targets ~360 mech (just above the ~342 desync edge seen
+// at 90). Raise if it still bounces/desyncs; the stuck-retry catches it.
+uint16_t sixstep_min_duty = 100;
 uint16_t stall_protect_minimum_duty = DEAD_TIME;
 char desync_check = 0;
 char low_kv_filter_level = 20;
