@@ -454,6 +454,13 @@ uint8_t bemf_timeout_happened = 0;
 char stuck_retry_used = 0;          // one-shot consumed since last neutral
 char stuck_waiting = 0;             // in the 500ms cool-off before the retry
 uint16_t stuck_retry_timer = 0;     // 10kHz ticks while waiting (5000 = 500ms)
+// After the retry releases, ramp the throttle command up from a low start so the
+// restart crawls through sine then 6-step instead of jumping to full command
+// (which a stuck/stopped rotor can't catch). Lower STUCK_RAMP_DIV = faster ramp.
+#define STUCK_RAMP_DIV 8            // adjusted_input +1 every 8 ticks (~0.8ms/step)
+char stuck_ramping = 0;             // soft-ramping the command after a retry
+uint16_t stuck_ramp_adj = 0;        // current cap on adjusted_input during the ramp
+uint8_t stuck_ramp_sub = 0;         // sub-tick divider for the ramp rate
 uint8_t changeover_step = 5;
 uint8_t filter_level = 5;
 uint8_t running = 0;
@@ -1026,6 +1033,7 @@ void tenKhzRoutine(){
 
 	tenkhzcounter++;
 	if(stuck_waiting && stuck_retry_timer < 60000){ stuck_retry_timer++; } // 500ms stuck-retry wait
+	if(stuck_ramping){ if(++stuck_ramp_sub >= STUCK_RAMP_DIV){ stuck_ramp_sub = 0; if(stuck_ramp_adj < 2047){ stuck_ramp_adj++; } } } // soft-ramp restart
 	if(tenkhzcounter > 10000){      // 1s sample interval 10000
 		consumed_current = (float)actual_current/360 + consumed_current;
 					switch (dshot_extended_telemetry){
@@ -1852,6 +1860,15 @@ if(newinput > 2000){
   		  }else{
   			  adjusted_input = newinput;
   		  }
+  	  // Soft-ramp the command after a stuck-rotor retry: ride stuck_ramp_adj up
+  	  // (crawls through sine then 6-step) instead of jumping straight to command.
+  	  if(stuck_ramping){
+  		  if(adjusted_input == 0 || stuck_ramp_adj >= adjusted_input){
+  			  stuck_ramping = 0;              // neutral, or ramp reached the command -> done
+  		  }else{
+  			  adjusted_input = stuck_ramp_adj;
+  		  }
+  	  }
 #ifndef BRUSHED_MODE
 
 	 	 if ((zero_crosses > 1000) || (adjusted_input == 0)){
@@ -1874,6 +1891,8 @@ if(newinput > 2000){
 	 		stuck_retry_used = 0;
 	 		stuck_waiting = 0;
 	 		stuck_retry_timer = 0;
+	 		stuck_ramping = 0;
+	 		stuck_ramp_adj = 0;
 	 	 }
 
  	 	 if(crawler_mode){
@@ -1901,6 +1920,7 @@ if(newinput > 2000){
 	 			stuck_waiting = 0; stuck_retry_used = 1;
 	 			running = 0;                        // force a clean restart
 	 			bemf_timeout_happened = 0;          // release the cut so the motor tries again
+	 			stuck_ramping = 1; stuck_ramp_adj = 30; stuck_ramp_sub = 0; // soft-ramp up to command
 	 		}else{
 	 			bemf_timeout_happened = 102;        // still waiting out the 500ms
 	 		}
