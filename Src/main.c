@@ -2057,10 +2057,12 @@ if(input > 48 && armed){
 	   	 		do_once_sinemode = 0;
 	   	 	}
 	 		 advanceincrement();
-             // UP-TRIP: raise the sine speed ceiling so sine drives the field up
-             // to ~280 rpm before handing to 6-step (810->480 lowers the minimum
-             // step_delay from ~50us to ~30us for 16-pole). Shrinks the up jump.
-             step_delay = map (input, 48, 120, 7000/motor_poles, 480/motor_poles);
+             // UP-TRIP: (1) raise the sine ceiling - 810->480 lowers the minimum
+             // step_delay ~50us->~30us (16-pole) so sine tops out ~280 rpm instead
+             // of ~171; (2) extend the saturation point 120->137 so sine keeps
+             // climbing right up to the changeover (input=137) instead of going
+             // flat from 120-137 -> removes the sine plateau, not just raises it.
+             step_delay = map (input, 48, 137, 7000/motor_poles, 480/motor_poles);
 	 		 delayMicros(step_delay);
 			 e_rpm =   600/ step_delay ;         // in hundreds so 33 e_rpm is 3300 actual erpm
 
