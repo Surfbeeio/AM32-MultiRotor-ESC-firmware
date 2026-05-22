@@ -451,7 +451,14 @@ uint8_t bemf_timeout_happened = 0;
 // 500ms one-shot stuck-rotor restart: on a stuck-rotor cut, wait 500ms then make
 // ONE restart attempt at the current command. If it stalls again, latch off until
 // the throttle returns to neutral (which re-arms the one-shot).
-char stuck_retry_used = 0;          // one-shot consumed since last neutral
+// Stall recovery: up to STUCK_MAX_RETRIES restart attempts within a rolling 5s
+// window. If it needs more than that, it's declared stuck and stays off until the
+// throttle returns to neutral (the only reset).
+#define STUCK_MAX_RETRIES 3
+#define STUCK_WINDOW_TICKS 50000    // 5s at 10kHz
+uint8_t stuck_retry_count = 0;      // retries used in the current window
+uint16_t stuck_window_timer = 0;    // 10kHz ticks since the window's first retry
+char stuck_latched = 0;             // declared stuck (>MAX in window) -> off till neutral
 char stuck_waiting = 0;             // in the 500ms cool-off before the retry
 uint16_t stuck_retry_timer = 0;     // 10kHz ticks while waiting (5000 = 500ms)
 // After the retry releases, ramp the throttle command up from a low start so the
@@ -1036,6 +1043,7 @@ void tenKhzRoutine(){
 
 	tenkhzcounter++;
 	if(stuck_waiting && stuck_retry_timer < 60000){ stuck_retry_timer++; } // 500ms stuck-retry wait
+	if(stuck_window_timer < 60000){ stuck_window_timer++; } // 5s stall-retry window
 	if(stuck_ramping){ uint8_t rdiv = (stuck_ramp_adj < STUCK_RAMP_LOWSINE) ? STUCK_RAMP_DIV_SINE : STUCK_RAMP_DIV_RUN; if(++stuck_ramp_sub >= rdiv){ stuck_ramp_sub = 0; if(stuck_ramp_adj < 2047){ stuck_ramp_adj++; } } } // soft-ramp restart (slow in low sine, faster after)
 	if(tenkhzcounter > 10000){      // 1s sample interval 10000
 		consumed_current = (float)actual_current/360 + consumed_current;
@@ -1892,8 +1900,10 @@ if(newinput > 2000){
 	 	 if(use_sin_start && adjusted_input < 160){
 	 		bemf_timeout_happened = 0;
 	 	 }
-	 	 if(adjusted_input == 0){          // back to neutral -> re-arm the 500ms one-shot retry
-	 		stuck_retry_used = 0;
+	 	 if(adjusted_input == 0){          // back to neutral -> reset the stall-retry window
+	 		stuck_retry_count = 0;
+	 		stuck_window_timer = 0;
+	 		stuck_latched = 0;
 	 		stuck_waiting = 0;
 	 		stuck_retry_timer = 0;
 	 		stuck_ramping = 0;
@@ -1915,14 +1925,22 @@ if(newinput > 2000){
 	 		 allOff();
 	 		 maskPhaseInterrupts();
 	 		 input = 0;
-	 		// 500ms one-shot restart before latching off:
-	 		if(stuck_retry_used){
-	 			bemf_timeout_happened = 102;        // retry already spent -> stay stuck till neutral
+	 		// 500ms-cool-off restart, up to STUCK_MAX_RETRIES per 5s window, else stuck:
+	 		if(stuck_window_timer >= STUCK_WINDOW_TICKS && !stuck_latched){
+	 			stuck_retry_count = 0;              // 5s since window start -> fresh window
+	 		}
+	 		if(stuck_latched){
+	 			bemf_timeout_happened = 102;        // already declared stuck -> off till neutral
+	 		}else if(stuck_retry_count >= STUCK_MAX_RETRIES){
+	 			stuck_latched = 1;                  // needed >3 retries in 5s -> stuck
+	 			bemf_timeout_happened = 102;
 	 		}else if(!stuck_waiting){
 	 			stuck_waiting = 1; stuck_retry_timer = 0;
 	 			bemf_timeout_happened = 102;        // hold off during the 500ms cool-off
-	 		}else if(stuck_retry_timer >= 5000){    // 500ms elapsed -> one restart at the command
-	 			stuck_waiting = 0; stuck_retry_used = 1;
+	 		}else if(stuck_retry_timer >= 5000){    // 500ms elapsed -> fire a restart at the command
+	 			stuck_waiting = 0;
+	 			if(stuck_retry_count == 0){ stuck_window_timer = 0; }  // window starts on first retry
+	 			stuck_retry_count++;
 	 			running = 0;                        // force a clean restart
 	 			bemf_timeout_happened = 0;          // release the cut so the motor tries again
 	 			stuck_ramping = 1; stuck_ramp_adj = 30; stuck_ramp_sub = 0; // soft-ramp up to command
@@ -2099,14 +2117,7 @@ if(input > 48 && armed){
 	   	 		do_once_sinemode = 0;
 	   	 	}
 	 		 advanceincrement();
-             // UP-TRIP: (1) raise the sine ceiling - 810->480 lowers the minimum
-             // step_delay ~50us->~30us (16-pole) so sine tops out ~280 rpm instead
-             // of ~171; (2) extend the saturation point 120->137 so sine keeps
-             // (1) ceiling 480->380 -> ~360 mech to meet the 6-step floor; (2) saturate
-             // at input=127 (not 137) so sine is already at its ceiling at the down-trip
-             // re-entry point (input<127) -> 6-step hands back to sine at sine's TOP, not a
-             // lower point. 127-137 is a small sine plateau at the ceiling before changeover.
-             step_delay = map (input, 48, 127, 7000/motor_poles, 380/motor_poles);
+             step_delay = map (input, 48, 120, 7000/motor_poles, 810/motor_poles);  // stock v1.97 sine
 	 		 delayMicros(step_delay);
 			 e_rpm =   600/ step_delay ;         // in hundreds so 33 e_rpm is 3300 actual erpm
 
