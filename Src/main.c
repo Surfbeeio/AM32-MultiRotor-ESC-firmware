@@ -451,13 +451,14 @@ uint8_t bemf_timeout_happened = 0;
 // 500ms one-shot stuck-rotor restart: on a stuck-rotor cut, wait 500ms then make
 // ONE restart attempt at the current command. If it stalls again, latch off until
 // the throttle returns to neutral (which re-arms the one-shot).
-// Stall recovery: up to STUCK_MAX_RETRIES restart attempts within a rolling 5s
-// window. If it needs more than that, it's declared stuck and stays off until the
-// throttle returns to neutral (the only reset).
+// Stall recovery: each retry restarts a rolling 5s window. STUCK_MAX_RETRIES
+// stalls within 5s of each other (i.e. without a clean >5s run between them) ->
+// declared stuck, off until the throttle returns to neutral. A lone stall after
+// running clean for >5s resets the count, so occasional stalls recover forever.
 #define STUCK_MAX_RETRIES 3
 #define STUCK_WINDOW_TICKS 50000    // 5s at 10kHz
 uint8_t stuck_retry_count = 0;      // retries used in the current window
-uint16_t stuck_window_timer = 0;    // 10kHz ticks since the window's first retry
+uint16_t stuck_window_timer = 0;    // 10kHz ticks since the last stall/retry
 char stuck_latched = 0;             // declared stuck (>MAX in window) -> off till neutral
 char stuck_waiting = 0;             // in the 500ms cool-off before the retry
 uint16_t stuck_retry_timer = 0;     // 10kHz ticks while waiting (5000 = 500ms)
@@ -1939,7 +1940,7 @@ if(newinput > 2000){
 	 			bemf_timeout_happened = 102;        // hold off during the 500ms cool-off
 	 		}else if(stuck_retry_timer >= 5000){    // 500ms elapsed -> fire a restart at the command
 	 			stuck_waiting = 0;
-	 			if(stuck_retry_count == 0){ stuck_window_timer = 0; }  // window starts on first retry
+	 			stuck_window_timer = 0;  // restart the 5s window on every retry (= time since last stall)
 	 			stuck_retry_count++;
 	 			running = 0;                        // force a clean restart
 	 			bemf_timeout_happened = 0;          // release the cut so the motor tries again
